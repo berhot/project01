@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "mode": "buffered-bidirectional",
+  "stream": {
+    "sample_rate": 16000,
+    "frame_ms": 20,
+    "max_segment_seconds": 8.0,
+    "silence_seconds": 0.6,
+    "partial_seconds": 0.75,
+    "min_segment_seconds": 0.25,
+    "rms_threshold": 0.008
+  }
+}

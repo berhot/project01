@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "features": {
+    "sample_rate": 16000,
+    "n_fft": 400,
+    "hop_length": 160,
+    "n_mels": 80,
+    "log_scale": 8.0
+  },
+  "acoustic": {
+    "hidden_size": 64,
+    "reduction": 4
+  },
+  "vocoder": {
+    "channels": 32
+  }
+}

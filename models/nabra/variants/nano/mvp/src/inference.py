@@ -42,6 +42,11 @@ def load_checkpoint(path, device):
         checkpoint["tokenizer"]
     )
 
+    if tokenizer.vocab_size != model_config.vocab_size:
+        raise ValueError("Tokenizer/model vocabulary mismatch")
+    if feature_config.n_mels != model_config.n_mels:
+        raise ValueError("Feature/model configuration mismatch")
+
     model = NabraASR(model_config)
 
     model.load_state_dict(
@@ -74,10 +79,18 @@ def load_release(version, device):
     if manifest["version"] != version:
         raise ValueError("Release version mismatch")
 
+    if manifest.get("schema_version") != "1.0.0":
+        raise ValueError("Unsupported release schema")
+    required = {"model.safetensors", "config.json", "tokenizer.json"}
+    if not required.issubset(manifest.get("files", {})):
+        raise ValueError("Incomplete release integrity manifest")
+
     if not manifest["approval"]["approved"]:
         raise ValueError("Release not approved")
 
     for name, expected in manifest["files"].items():
+        if Path(name).name != name or name in {".", ".."}:
+            raise ValueError("Invalid release file path")
         if file_hash(directory / name) != expected:
             raise ValueError(
                 f"Release file hash mismatch: {name}"
@@ -106,6 +119,11 @@ def load_release(version, device):
     )
 
     model = NabraASR(model_config)
+
+    if tokenizer.vocab_size != model_config.vocab_size:
+        raise ValueError("Tokenizer/model vocabulary mismatch")
+    if feature_config.n_mels != model_config.n_mels:
+        raise ValueError("Feature/model configuration mismatch")
 
     model.load_state_dict(
         load_file(

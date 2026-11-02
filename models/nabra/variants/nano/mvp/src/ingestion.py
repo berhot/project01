@@ -28,6 +28,9 @@ def inspect_recording(wav_path, txt_path):
     wav_path = Path(wav_path).resolve()
     txt_path = Path(txt_path).resolve()
 
+    if not wav_path.is_file():
+        raise FileNotFoundError(f"Missing audio: {wav_path}")
+
     if not txt_path.is_file():
         raise FileNotFoundError(
             f"Missing transcript: {txt_path}"
@@ -48,6 +51,8 @@ def inspect_recording(wav_path, txt_path):
         sample_width = audio.getsampwidth()
         frames = audio.getnframes()
         compression = audio.getcomptype()
+        if len(audio.readframes(frames)) != frames * channels * sample_width:
+            raise ValueError(f"Truncated WAV payload: {wav_path}")
 
     if channels != 1:
         raise ValueError(
@@ -161,3 +166,47 @@ def write_manifest(records, output_path):
                     sort_keys=True,
                 ) + "\n"
             )
+
+
+def read_records(source):
+    """Read a paired directory or a JSONL manifest and verify content hashes."""
+    source = Path(source).expanduser().resolve()
+    if source.is_dir():
+        return inspect_split(source)
+    records = []
+    seen = set()
+    from .features import read_wav
+    for line in source.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        audio = Path(record["audio"])
+        if not audio.is_absolute():
+            audio = source.parent / audio
+        audio = audio.resolve()
+        waveform = read_wav(audio)
+        duration = len(waveform) / SAMPLE_RATE
+        if not MIN_DURATION <= duration <= MAX_DURATION:
+            raise ValueError("Invalid recording duration")
+        if not isinstance(record.get("transcript"), str) or not record["transcript"].strip():
+            raise ValueError("Empty transcript")
+        digest = sha256_file(audio)
+        if record.get("audio_sha256", digest) != digest:
+            raise ValueError("Audio manifest hash mismatch")
+        if digest in seen:
+            raise ValueError("Duplicate audio recording")
+        seen.add(digest)
+        if "sample_rate" in record and record["sample_rate"] != SAMPLE_RATE:
+            raise ValueError("Sample rate mismatch")
+        records.append({**record, "audio": str(audio), "audio_sha256": digest,
+                        "sample_rate": SAMPLE_RATE, "duration_seconds": round(duration, 4)})
+    if not records:
+        raise ValueError("Empty manifest")
+    return records
+
+
+def validate_splits(train, val):
+    if not train or not val:
+        raise ValueError("Both dataset splits must be nonempty")
+    if {r["audio_sha256"] for r in train} & {r["audio_sha256"] for r in val}:
+        raise ValueError("Duplicate audio across dataset splits")

@@ -7,6 +7,35 @@ from .inference import transcribe
 from .paths import get_run_dir
 
 
+def evaluate_checkpoint(checkpoint_path, device="cpu", validation_source=None):
+    """Verify labels/audio and bind an evaluation to the exact checkpoint bytes."""
+    import torch
+    from .inference import load_checkpoint
+    from .ingestion import read_records, sha256_file
+    from .runtime import fingerprint
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    expected = checkpoint["source_manifest"]["val"]
+    records = read_records(validation_source) if validation_source else expected
+    if fingerprint(records) != fingerprint(expected):
+        raise ValueError("Validation dataset changed since training")
+    for record in records:
+        if sha256_file(record["audio"]) != record["audio_sha256"]:
+            raise ValueError("Validation audio changed since training")
+    model, tokenizer, features = load_checkpoint(checkpoint_path, device)
+    result = evaluate_asr(model, tokenizer, features, records)
+    output = get_run_dir(checkpoint["run_id"]) / "evaluations" / f"epoch_{checkpoint['epoch']:04d}.json"
+    digest = sha256_file(checkpoint_path)
+    if output.exists():
+        previous = json.loads(output.read_text())
+        if previous.get("checkpoint_sha256") != digest or previous.get("run_id") != checkpoint["run_id"] or previous.get("epoch") != checkpoint["epoch"]:
+            raise ValueError("Existing evaluation has mismatched provenance")
+        if any(previous.get(key) != value for key, value in result.items()):
+            raise ValueError("Existing evaluation differs from fresh results; preserve it and investigate")
+    else:
+        write_evaluation(checkpoint["run_id"], checkpoint["epoch"], digest, result)
+    return result, output
+
+
 def edit_distance(reference, hypothesis):
     previous = list(range(len(hypothesis) + 1))
 

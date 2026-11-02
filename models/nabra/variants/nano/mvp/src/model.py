@@ -14,6 +14,13 @@ class ModelConfig:
     num_layers: int = 2
     dropout: float = 0.1
 
+    def __post_init__(self):
+        if any(not isinstance(x, int) or x < 1 for x in
+               (self.n_mels, self.vocab_size, self.hidden_size, self.num_layers)):
+            raise ValueError("Model dimensions must be positive integers")
+        if self.vocab_size < 2 or not 0 <= self.dropout < 1:
+            raise ValueError("Invalid vocabulary or dropout")
+
 
 class NabraASR(nn.Module):
     def __init__(self, config):

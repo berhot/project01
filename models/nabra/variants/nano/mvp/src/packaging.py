@@ -88,6 +88,13 @@ def package_release(
         )
     )
 
+    if report.get("schema_version") != "1.0.0" or report.get("model_family") != "nabra":
+        raise ValueError("Unsupported evaluation report schema")
+    if report.get("evaluated_recordings", 0) < 1:
+        raise ValueError("Evaluation contains no recordings")
+    if not math.isfinite(float(report["wer"])) or report["wer"] < 0:
+        raise ValueError("Invalid evaluation WER")
+
     if report["run_id"] != run_id:
         raise ValueError("Evaluation run mismatch")
 
@@ -103,7 +110,7 @@ def package_release(
 
     cer = float(report["cer"])
 
-    if not math.isfinite(cer) or cer > max_cer:
+    if not math.isfinite(cer) or cer < 0 or cer > max_cer:
         raise ValueError(
             f"CER {cer:.4f} exceeds threshold"
         )
@@ -111,6 +118,9 @@ def package_release(
     model_config = ModelConfig(
         **checkpoint["model_config"]
     )
+    features = FeatureConfig(**checkpoint["feature_config"])
+    if features.n_mels != model_config.n_mels:
+        raise ValueError("Feature/model configuration mismatch")
 
     tokenizer = CharTokenizer.from_dict(
         checkpoint["tokenizer"]
@@ -186,6 +196,8 @@ def package_release(
             "model_family": "nabra",
             "variant": "nano",
             "version": version,
+            "quality_status": "experimental-engineering-release",
+            "production_ready": False,
             "source_run_id": run_id,
             "epoch": epoch,
             "created_at": datetime.now(
@@ -197,6 +209,7 @@ def package_release(
                 "maximum_cer": max_cer,
             },
             "evaluation": {
+                "report_sha256": sha256_file(report_path),
                 "cer": cer,
                 "wer": report["wer"],
                 "checkpoint_sha256": (

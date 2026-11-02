@@ -18,6 +18,13 @@ class FeatureConfig:
     f_min: float = 0.0
     f_max: float = 8000.0
 
+    def __post_init__(self):
+        if any(not isinstance(x, int) or x < 1 for x in
+               (self.sample_rate, self.n_fft, self.hop_length, self.n_mels)):
+            raise ValueError("Feature dimensions must be positive integers")
+        if not 0 <= self.f_min < self.f_max <= self.sample_rate / 2:
+            raise ValueError("Invalid frequency bounds")
+
 
 def read_wav(path, sample_rate=16000):
     path = Path(path)
@@ -33,7 +40,10 @@ def read_wav(path, sample_rate=16000):
                 "Expected 16 kHz mono PCM16 WAV"
             )
 
-        raw = wav.readframes(wav.getnframes())
+        frames = wav.getnframes()
+        raw = wav.readframes(frames)
+        if len(raw) != frames * 2:
+            raise ValueError("Truncated WAV payload")
 
     audio = np.frombuffer(
         raw, dtype="<i2"
@@ -116,6 +126,10 @@ class LogMelExtractor:
         config = self.config
 
         waveform = waveform.float()
+        if waveform.ndim != 1 or waveform.numel() == 0 or not torch.isfinite(waveform).all():
+            raise ValueError("Expected finite nonempty mono waveform")
+        if len(waveform) <= config.n_fft // 2:
+            waveform = F.pad(waveform, (0, config.n_fft // 2 + 1 - len(waveform)))
 
         # Centered STFT, fixed preprocessing.
         spectrum = torch.stft(

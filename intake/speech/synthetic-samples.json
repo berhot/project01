@@ -1,0 +1,35 @@
+{
+  "synthetic": true,
+  "purpose": "Local pipeline smoke testing only",
+  "generator": "macOS say",
+  "voice": "Majed",
+  "language": "Arabic",
+  "speech_rate": 145,
+  "sample_rate": 16000,
+  "channels": 1,
+  "encoding": "PCM signed 16-bit",
+  "validation_note": "All clips use the same synthetic voice; these splits do not measure generalization to real speakers.",
+  "samples": [
+    {
+      "audio": "train/clip001.wav",
+      "transcript_file": "train/clip001.txt",
+      "transcript": "مرحبا أنا أتعلم الذكاء الاصطناعي",
+      "duration_seconds": 4.3717,
+      "audio_sha256": "d7e2627f95bd7df534b1b8c917a471bf13f9d6f8da3eb19c1261193a002c6466"
+    },
+    {
+      "audio": "train/clip002.wav",
+      "transcript_file": "train/clip002.txt",
+      "transcript": "المملكة العربية السعودية دولة كبيرة",
+      "duration_seconds": 4.9871,
+      "audio_sha256": "960f2addd2ba52533c39c28c656e3b0f907c43b8b0c2352eea2684ab12f1a597"
+    },
+    {
+      "audio": "val/clip101.wav",
+      "transcript_file": "val/clip101.txt",
+      "transcript": "أنا أتعلم العربية",
+      "duration_seconds": 2.5851,
+      "audio_sha256": "bab989d3cf0acb74e0f5cfafed359013b6ab793db4369ac9db78f2d6c366d25b"
+    }
+  ]
+}

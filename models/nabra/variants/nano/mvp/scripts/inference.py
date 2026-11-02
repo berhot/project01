@@ -23,9 +23,11 @@ def main():
         "--audio", required=True
     )
 
+    parser.add_argument("--device", default="auto", choices=["auto", "cpu", "mps", "cuda"])
     args = parser.parse_args()
 
-    device = get_device()
+    from src.runtime import select_device
+    device = select_device(args.device)
 
     if args.release:
         model, tokenizer, features = load_release(

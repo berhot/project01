@@ -1,0 +1,47 @@
+{
+  "dataset": "google/fleurs",
+  "config": "ar_eg",
+  "revision": "70bb2e84b976b7e960aa89f1c648e09c59f894dd",
+  "license": "CC-BY-4.0",
+  "modifications": "PCM16 conversion; fixture-only repartition; publisher transcription unchanged",
+  "records": [
+    {
+      "split": "train",
+      "upstream_split": "validation",
+      "row_index": 5,
+      "upstream_id": 1573,
+      "upstream_filename": "10367320584353134559.wav",
+      "audio": "train/fleurs-5.wav",
+      "audio_sha256": "c0e4f99f1b48013690a7627b62c23a7fbf593797f0345ec7c43af4345a422e8f",
+      "original_audio_sha256": "6f1d8a6ea2239e697402a9a56e160e4145cf868c39c502dff3ec485a0de2a763",
+      "speaker_id": null,
+      "transcript_sha256": "ff1e6326f61bf3799767afc89f55c56825b861f922801b0d679f89e04a0dea33"
+    },
+    {
+      "split": "train",
+      "upstream_split": "validation",
+      "row_index": 9,
+      "upstream_id": 1533,
+      "upstream_filename": "10670795917484271961.wav",
+      "audio": "train/fleurs-9.wav",
+      "audio_sha256": "8a6ce81a1c1bb530107d98b3dd5173944ca52efbaed7b403e9613d156adb174e",
+      "original_audio_sha256": "6953457d51209bc9610323f1d75db67c37b61a26204253493c097cfe4f17df0b",
+      "speaker_id": null,
+      "transcript_sha256": "62f0b98d99107069054f444484c242f95d5f398d55f8bf53491c587b2c0f5ab2"
+    },
+    {
+      "split": "val",
+      "upstream_split": "validation",
+      "row_index": 7,
+      "upstream_id": 1555,
+      "upstream_filename": "10615631686356424186.wav",
+      "audio": "val/fleurs-7.wav",
+      "audio_sha256": "3624cfe3b2a9f7ec9829ba8cded4d32ed934635c118ee98aff592e1bb40c58e4",
+      "original_audio_sha256": "a168c56786fb27b385610d9dae670db8b6373508f132b68bd4890b6df510d917",
+      "speaker_id": null,
+      "transcript_sha256": "11e0e704a879616d738a5818938414aff6170f545dfbfc02906c0a7426d84d6b"
+    }
+  ],
+  "schema_version": 1,
+  "purpose": "Human-speech engineering smoke test; upstream validation repartitioned, not a benchmark"
+}
