@@ -190,6 +190,14 @@ def read_records(source):
             raise ValueError("Invalid recording duration")
         if not isinstance(record.get("transcript"), str) or not record["transcript"].strip():
             raise ValueError("Empty transcript")
+        if record.get("transcript_file"):
+            transcript_file = Path(record["transcript_file"])
+            if not transcript_file.is_absolute():
+                transcript_file = source.parent / transcript_file
+            if record.get("transcript_sha256") != sha256_file(transcript_file):
+                raise ValueError("Transcript manifest hash mismatch")
+            if transcript_file.read_text(encoding="utf-8").strip() != record["transcript"]:
+                raise ValueError("Transcript text differs from paired file")
         digest = sha256_file(audio)
         if record.get("audio_sha256", digest) != digest:
             raise ValueError("Audio manifest hash mismatch")

@@ -22,6 +22,7 @@ def main(command):
         parser.add_argument('--steps',type=int,default=100);parser.add_argument('--learning-rate',type=float,default=0.001)
         parser.add_argument('--seed',type=int,default=42);parser.add_argument('--resume');parser.add_argument('--run-id')
         parser.add_argument('--config');parser.add_argument('--save-interval',type=int,default=25)
+        parser.add_argument('--max-seconds',type=float,help='Checkpoint after the current step when the time budget expires')
     elif command=='evaluate':
         parser.add_argument('--checkpoint',required=True);parser.add_argument('--output')
     elif command=='inference':
@@ -47,7 +48,7 @@ def main(command):
         from .trainer import train
         train(train_source=args.train_source,val_source=args.val_source,steps=args.steps,learning_rate=args.learning_rate,
               seed=args.seed,device_name=args.device,config=json.loads(Path(args.config).read_text()) if args.config else None,
-              resume=args.resume,run_id=args.run_id,save_interval=args.save_interval)
+              resume=args.resume,run_id=args.run_id,save_interval=args.save_interval,max_seconds=args.max_seconds)
     elif command=='evaluate':
         from .evaluator import evaluate
         report,path=evaluate(args.checkpoint,select_device(args.device),args.output)
