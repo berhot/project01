@@ -86,6 +86,27 @@ jobs:
               assert 3 + half - 1e-3 <= y <= 29 - half + 1e-3
           print("Learned layout sampling, bounds, and six-prompt PNG export passed")
           PY
+      - name: RGB pixel diffusion smoke training (not image quality validation)
+        run: |
+          python -m scripts.pixel_diffusion train \
+            --steps 40 --batch-size 6 --device cpu --cpu-threads 2 \
+            --output-root /tmp/sora-pixel-artifacts
+      - name: Bilingual RGB pixel diffusion PNG inference
+        run: |
+          PIXEL=$(find /tmp/sora-pixel-artifacts -name checkpoint.pt -type f | head -n 1)
+          test -n "$PIXEL"
+          python -m scripts.pixel_diffusion evaluate \
+            --checkpoint "$PIXEL" --seed 42 --sample-steps 8 \
+            --output-dir /tmp/sora-pixel-preview
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path("/tmp/sora-pixel-preview/report.json").read_text())
+          assert report["image_pixels_generated_by_diffusion"] is True
+          assert len(report["items"])==12
+          assert sum(1 for p in Path("/tmp/sora-pixel-preview").glob("*.png"))==13
+          print("Pixel-level RGB diffusion smoke passed; visual quality NOT certified")
+          PY
       - name: Upload genuine learned samples
         if: always()
         uses: actions/upload-artifact@v4
@@ -96,4 +117,5 @@ jobs:
             /tmp/sora-preview-seed123/
             /tmp/sora-learned-layout-seed42/
             /tmp/sora-learned-layout-seed123/
+            /tmp/sora-pixel-preview/
           if-no-files-found: ignore
