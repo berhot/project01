@@ -96,7 +96,7 @@ jobs:
           PIXEL=$(find /tmp/sora-pixel-artifacts -name checkpoint.pt -type f | head -n 1)
           test -n "$PIXEL"
           python -m scripts.pixel_diffusion evaluate \
-            --checkpoint "$PIXEL" --seed 42 --sample-steps 8 \
+            --checkpoint "$PIXEL" --seed 42 --sampler ddim --sample-steps 8 \
             --output-dir /tmp/sora-pixel-preview
           python - <<'PY'
           import json
