@@ -74,3 +74,18 @@ committed to GitHub.
 Do not describe this MVP as production-ready or as understanding arbitrary
 prompts. Nabra is also still experimental: its unseen-speech outputs remain
 unintelligible, despite software and single-recording vocoder successes.
+
+## Visual validation and schedule fix
+
+The initial 200/1000-step linear-schedule experiment produced colored noise,
+not recognizable circles/squares. It **failed visual validation** despite
+falling training loss. The prior 50-step linear schedule did not sufficiently
+corrupt images at the final timestep, although inference began at pure noise.
+
+This version uses a cosine schedule reaching approximately pure noise and the
+DDPM posterior variance during reverse sampling. **Old checkpoints are not
+compatible**; the inference CLI rejects them. Preserve the old files for
+comparison and train an entirely new run using the updated branch.
+
+The correction is a hypothesis, not evidence of image quality improvement until
+new training and six-prompt visual inspection pass. This PR remains a draft.
