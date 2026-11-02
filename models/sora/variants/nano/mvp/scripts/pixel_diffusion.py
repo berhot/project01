@@ -85,7 +85,7 @@ def train(args):
     return path
 
 
-def evaluate(model,path,seed=42,sample_steps=50,scale=8):
+def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mean")
     path=Path(path)
     path.mkdir(parents=True,exist_ok=False)
     grid=Image.new("RGB",(3*32*scale,4*(32*scale+25)),"white")
@@ -94,7 +94,7 @@ def evaluate(model,path,seed=42,sample_steps=50,scale=8):
     device=next(model.parameters()).device
     for j,(english,arabic) in enumerate(PROMPTS):
         for lang_index,prompt in enumerate((english,arabic)):
-            image=generate(model,prompt,seed=seed+j,device=device,steps=sample_steps)
+            image=generate(model,prompt,seed=seed+j,device=device,steps=sample_steps,sampler=sampler)
             name=english.replace(" ","_")+("_en.png" if lang_index==0 else "_ar.png")
             save_image(image,path/name)
             thumbnail=Image.open(path/name).resize((32*scale,32*scale),Image.Resampling.NEAREST)
@@ -109,6 +109,7 @@ def evaluate(model,path,seed=42,sample_steps=50,scale=8):
         "schema_version":1,"architecture":"rgb-unet-text-v1",
         "training_data":"synthetic; no photorealistic or open-domain data",
         "image_pixels_generated_by_diffusion":True,
+        "sampler":sampler,"sample_steps":sample_steps,
         "visual_quality":"not automatically certified",
         "items":entries,
     },indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
@@ -133,22 +134,24 @@ def main():
     e.add_argument("--checkpoint",required=True)
     e.add_argument("--output-dir",required=True)
     e.add_argument("--seed",type=int,default=42)
-    e.add_argument("--sample-steps",type=int,default=50)
+    e.add_argument("--sample-steps",type=int,default=None)
+    e.add_argument("--sampler",choices=("posterior_mean","ddim"),default="posterior_mean")
     e.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     s=sub.add_parser("sample")
     s.add_argument("--checkpoint",required=True)
     s.add_argument("--prompt",required=True)
     s.add_argument("--output",required=True)
     s.add_argument("--seed",type=int,default=42)
-    s.add_argument("--sample-steps",type=int,default=50)
+    s.add_argument("--sample-steps",type=int,default=None)
+    s.add_argument("--sampler",choices=("posterior_mean","ddim"),default="posterior_mean")
     s.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     args=p.parse_args()
     if args.action=="train": train(args)
     elif args.action=="evaluate":
-        evaluate(load_model(args.checkpoint,args.device),args.output_dir,args.seed,args.sample_steps)
+        evaluate(load_model(args.checkpoint,args.device),args.output_dir,args.seed,args.sample_steps,sampler=args.sampler)
     else:
         model=load_model(args.checkpoint,args.device)
-        save_image(generate(model,args.prompt,args.seed,args.device,args.sample_steps),args.output)
+        save_image(generate(model,args.prompt,args.seed,args.device,args.sample_steps,sampler=args.sampler),args.output)
         print(json.dumps({"output":args.output,"prompt":args.prompt},ensure_ascii=False))
 
 if __name__=="__main__": main()
