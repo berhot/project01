@@ -85,7 +85,7 @@ def train(args):
     return path
 
 
-def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mean")
+def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mean"):
     path=Path(path)
     path.mkdir(parents=True,exist_ok=False)
     grid=Image.new("RGB",(3*32*scale,4*(32*scale+25)),"white")
