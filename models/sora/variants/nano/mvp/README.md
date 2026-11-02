@@ -89,3 +89,42 @@ comparison and train an entirely new run using the updated branch.
 
 The correction is a hypothesis, not evidence of image quality improvement until
 new training and six-prompt visual inspection pass. This PR remains a draft.
+
+## New experiment: conditional VAE (shape-CVAE v1)
+
+**Why:** The original DDPM and its corrected cosine schedule both generated
+multicolored noise after 1,000 steps. Falling diffusion loss was not evidence
+of visual quality. Keep those DDPM checkpoints intact. This *separate*
+conditional variational autoencoder (CVAE) trains on the same six generated
+32×32 shape classes with a conditional encoder/decoder and KL regularization.
+It generates pixels from **learned weights and sampled latent noise**; the
+procedural shape drawing code is used **only in training**, never for inference.
+The experiment is not diffusion and must not be described as a working DDPM.
+
+After fetching the updated PR in your **existing BERHOT folder**, use:
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT/models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+python3 -m scripts.cvae train --steps 1000 --batch-size 16 --device cpu
+```
+
+Use the actual **new CVAE** checkpoint printed by training (not an old DDPM
+checkpoint) to create a sample and a six-image preview:
+
+```bash
+python3 -m scripts.cvae sample \\
+  --checkpoint <NEW_CVAE_CHECKPOINT> --prompt 'دائرة حمراء' \\
+  --output /tmp/sora-cvae-red-circle.png
+python3 -m scripts.cvae evaluate \\
+  --checkpoint <NEW_CVAE_CHECKPOINT> \\
+  --output-dir /tmp/sora-cvae-preview-01 --seed 42
+open /tmp/sora-cvae-preview-01/preview_grid.png
+```
+
+The evaluator saves six separate true model outputs plus a contact sheet and
+JSON manifest, but **does not automatically certify image quality**.
+Recognition of shapes and colors must be checked visually, and different
+seeds should also be tested. Successful output is limited to these six classes.
+This experiment is a comparison baseline while future diffusion improvements
+remain under development; it is not a general image-design product.
