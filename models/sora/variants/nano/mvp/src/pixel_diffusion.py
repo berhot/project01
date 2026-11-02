@@ -165,25 +165,49 @@ def training_loss(model,images,tokens):
 
 
 @torch.no_grad()
-def generate(model,prompt,seed=42,device="cpu",steps=None):
-    """Deterministic DDIM over RGB pixels, starting from independent Gaussian noise."""
+def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mean"):
+    """Generate pixels from learned diffusion.
+
+    'posterior_mean': full-step DDPM posterior mean without added variance
+    (deterministic, often sharper on the toy task, not an unbiased DDPM sample).
+    'ddim': deterministic DDIM with optional timestep skipping.
+    """
     total=model.config.diffusion_steps
-    steps=total if steps is None else steps
-    if steps<2 or steps>total: raise ValueError("Invalid inference steps")
+    if sampler not in ("posterior_mean","ddim"):
+        raise ValueError("Unsupported diffusion sampler")
+    if sampler=="posterior_mean":
+        if steps not in (None,total):
+            raise ValueError("posterior_mean requires all diffusion timesteps")
+        steps=total
+    else:
+        steps=total if steps is None else steps
+        if steps<2 or steps>total: raise ValueError("Invalid inference steps")
     tokens=tokenize(prompt).unsqueeze(0).to(device)
     generator=torch.Generator(device=device).manual_seed(int(seed))
     x=torch.randn((1,3,32,32),device=device,generator=generator)
-    _,_,cum=noise_schedule(model.config,device)
-    timesteps=torch.linspace(total-1,0,steps).round().long().unique_consecutive()
+    beta,alpha,cum=noise_schedule(model.config,device)
     model.eval()
-    for i,t in enumerate(timesteps.tolist()):
-        eps=model(x,torch.tensor([t],device=device,dtype=torch.long),tokens)
-        alpha=cum[t]
-        x0=((x-(1-alpha).sqrt()*eps)/alpha.sqrt()).clamp(-1,1)
-        if i+1==len(timesteps): x=x0
-        else:
-            prev=cum[timesteps[i+1].item()]
-            x=prev.sqrt()*x0+(1-prev).sqrt()*eps
+    if sampler=="posterior_mean":
+        for t in range(total-1,-1,-1):
+            eps=model(x,torch.tensor([t],device=device,dtype=torch.long),tokens)
+            a=cum[t]
+            x0=((x-(1-a).sqrt()*eps)/a.sqrt()).clamp(-1,1)
+            if t==0: x=x0
+            else:
+                prev=cum[t-1]
+                mean_x0=beta[t]*prev.sqrt()/(1-a)
+                mean_xt=alpha[t].sqrt()*(1-prev)/(1-a)
+                x=mean_x0*x0+mean_xt*x
+    else:
+        timesteps=torch.linspace(total-1,0,steps).round().long().unique_consecutive()
+        for i,t in enumerate(timesteps.tolist()):
+            eps=model(x,torch.tensor([t],device=device,dtype=torch.long),tokens)
+            a=cum[t]
+            x0=((x-(1-a).sqrt()*eps)/a.sqrt()).clamp(-1,1)
+            if i+1==len(timesteps): x=x0
+            else:
+                prev=cum[timesteps[i+1].item()]
+                x=prev.sqrt()*x0+(1-prev).sqrt()*eps
     return x[0].clamp(-1,1).cpu()
 
 
