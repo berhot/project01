@@ -128,3 +128,60 @@ Recognition of shapes and colors must be checked visually, and different
 seeds should also be tested. Successful output is limited to these six classes.
 This experiment is a comparison baseline while future diffusion improvements
 remain under development; it is not a general image-design product.
+
+## Experimental spatial-field model — sharp controlled shapes
+
+The earlier DDPM **failed** visual evaluation, and the CVAE completed
+training but generated soft / poorly defined shapes in the Mac user's test.
+The new `spatial-field-v1` is a **separate neural renderer**, not a general
+image-generation model. It receives one of the same six discrete prompt
+labels **and explicit seeded geometry** (center X, center Y, size). A learned
+per-pixel neural field predicts a shape occupancy mask and RGB colors.
+Training uses synthetic images as supervised targets; **inference does not
+call the synthetic image renderer or copy target images**. The layout and
+foreground/background compositing are explicit architectural priors.
+
+### Test and train in the existing BERHOT folder
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+python3 -m scripts.spatial_field train \
+  --steps 1100 --batch-size 24 --device cpu --cpu-threads 2
+```
+
+The trainer prints a **new** `storage/artifacts/sora/nano/mvp/spatial-.../checkpoint.pt`.
+Copy that exact path and create the six-image contact sheet:
+
+```bash
+CKPT="storage/artifacts/sora/nano/mvp/spatial-REPLACE_WITH_ACTUAL_RUN/checkpoint.pt"
+python3 -m scripts.spatial_field evaluate \
+  --checkpoint "$CKPT" --seed 42 \
+  --output-dir /tmp/sora-spatial-seed42
+open /tmp/sora-spatial-seed42/preview_grid.png
+python3 -m scripts.spatial_field sample \
+  --checkpoint "$CKPT" --prompt "دائرة حمراء" --seed 123 \
+  --output /tmp/sora-spatial-arabic.png
+open /tmp/sora-spatial-arabic.png
+```
+
+The evaluation writes `report.json` with per-class foreground-mask
+intersection-over-union (IoU) and pixel mean absolute error (MAE), using
+synthetic images for **evaluation only**. Choose a new `--output-dir` when
+re-running; the exporter refuses existing paths to avoid overwrites.
+
+In an independent CPU experiment using a near-identical spatial field
+implementation, **1100 steps and 24 held-out layouts across seeds 42, 123,
+997, 2025** yielded mean mask IoU **0.9885**, minimum **0.9380**, and mean
+RGB MAE **0.0069**. The experiment checkpoint was not committed to GitHub.
+These are results for synthetic shapes with known geometry, **not** evidence
+of open-ended design abilities. Evaluate the repository implementation
+separately; results may differ across devices / random initialization.
+
+The model is deliberately constrained. **It cannot compose arbitrary
+posters, logos, lettering, scenes, or open-vocabulary prompts**, and its
+geometry is supplied externally. Treat it as a quality-control milestone
+for the next, more general image-generation architecture, not a release.
