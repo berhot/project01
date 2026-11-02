@@ -47,7 +47,7 @@ class CorpusPreparationTests(unittest.TestCase):
                 wav=root/(name+".wav")
                 with wave.open(str(wav),"wb") as w:
                     w.setnchannels(1);w.setsampwidth(2);w.setframerate(16000)
-                    w.writeframes(bytes(16000))
+                    w.writeframes((b"\x01\x00" if name=="train" else b"\x02\x00")*8000)
                 record={"audio":name+".wav","transcript":text,"audio_sha256":sha256_file(wav)}
                 (root/(name+".jsonl")).write_text(json.dumps(record,ensure_ascii=False)+"\n",encoding="utf8")
             report=preflight(root/"train.jsonl",root/"val.jsonl")
