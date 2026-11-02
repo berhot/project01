@@ -1,7 +1,6 @@
 """Immutable speech standardization, provenance and leakage-safe splits."""
 import hashlib
 import json
-import math
 import os
 import random
 import subprocess
@@ -85,8 +84,8 @@ def prepare(index, output, fraction=0.2, seed=42, ffmpeg="ffmpeg"):
         sources.append((item, original, digest))
     if not sources:
         raise ValueError("Empty corpus index")
-    if len({(s[2], s[0]["transcript"]) for s in sources}) != len(sources):
-        raise ValueError("Duplicate audio/transcript pairs")
+    if len({s[2] for s in sources}) != len(sources):
+        raise ValueError("Duplicate original audio files in corpus index")
     # Validate and group BEFORE creating output.
     dummy = [{"transcript": s[0]["transcript"]} for s in sources]
     split_groups(dummy, fraction, seed)
