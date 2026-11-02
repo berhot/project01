@@ -33,7 +33,7 @@ class CorpusPreparationTests(unittest.TestCase):
                 {"audio":"original.wav","transcript":"مرحبا"},
                 {"audio":"original.wav","transcript":"صباح الخير"},
             ]
-            index.write_text("".join(json.dumps(row,ensure_ascii=False)+"\\n" for row in lines),encoding="utf8")
+            index.write_text("".join(json.dumps(row,ensure_ascii=False)+"\n" for row in lines),encoding="utf8")
             destination=root/"prepared"
             with self.assertRaisesRegex(ValueError,"Duplicate original"):
                 prepare(index,destination)
