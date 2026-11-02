@@ -11,7 +11,7 @@ from src.tts.unseen_evaluation import assess_waveform, read_prompts
 class UnseenEvaluationTests(unittest.TestCase):
     def test_waveform_checks(self):
         values = assess_waveform(torch.tensor([0.0, 0.5, -1.0]))
-        self.assertEqual(values["clip_fraction"], 1 / 3)
+        self.assertAlmostEqual(values["clip_fraction"], 1 / 3, places=6)
         self.assertEqual(values["duration_seconds"], 3 / 16000)
         with self.assertRaises(ValueError):
             assess_waveform(torch.tensor([float("nan")]))
