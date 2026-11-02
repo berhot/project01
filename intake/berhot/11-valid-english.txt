@@ -1,0 +1,8 @@
+Data Governance Note
+
+Riyadh is the capital of the Kingdom of Saudi Arabia and its administrative
+centre. The National Strategy for Data and Artificial Intelligence sets targets
+for 2030, covering skills, regulation and the growth of a local data economy.
+
+Every dataset used for training should carry a recorded source, a licence, and
+evidence of the checks it passed before it was approved.

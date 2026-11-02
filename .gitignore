@@ -1,1 +1,27 @@
 .venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Local storage payloads: retain directories and scaffold markers only.
+/storage/data/**
+!/storage/data/**/
+!/storage/data/**/.gitkeep
+/storage/artifacts/**
+!/storage/artifacts/**/
+!/storage/artifacts/**/.gitkeep
+/storage/incoming/**
+!/storage/incoming/**/
+!/storage/incoming/**/.gitkeep
+/storage/cache/**
+!/storage/cache/**/
+!/storage/cache/**/.gitkeep
+/storage/tmp/**
+!/storage/tmp/**/
+!/storage/tmp/**/.gitkeep
+
+# Local configuration and credentials.
+.env
+.env.*
+!.env.example
+/storage/r2.local.json

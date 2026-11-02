@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0.0",
+  "model_family": "jsm",
+  "variant": "nano",
+  "version": "0.1.0",
+  "source_run_id": "nano-20261102T074817Z-096856a2",
+  "training_step": 1000,
+  "corpus_sha256": "2b928f775db2024182161275304a254ce14da7f51d23e892f066fe9866485fe6",
+  "tokenizer_type": "char-v1",
+  "created_at": "2026-11-02T07:56:24.733213+00:00",
+  "approval": {
+    "approved": true,
+    "method": "explicit-cli-approval",
+    "max_validation_loss": 3.0
+  },
+  "evaluation": {
+    "validation_loss": 2.3707156548133264,
+    "perplexity": 10.705050664440728,
+    "evaluated_tokens": 4992,
+    "checkpoint_sha256": "edf29809f743ee999d7fe338bda944d7dcceacbd0ab2579543e311ef06cddc55"
+  },
+  "files": {
+    "model.safetensors": {
+      "sha256": "9e4b9d85441b2dc1a579d95a36ccf53b8e32ec4df47ff71ad12d3b4fece90391"
+    },
+    "config.json": {
+      "sha256": "d24ad09614314ef7c49b65041e6351eaa369b259e3680385ee15f0bf1bbb6d3c"
+    },
+    "tokenizer.json": {
+      "sha256": "1e65e6872c57be302e5afba036349e3b8244a02cdd2ccfe5daf76864a8be4253"
+    }
+  }
+}

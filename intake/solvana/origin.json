@@ -1,0 +1,7 @@
+{
+  "platform": "SOLVANA",
+  "source_type": "commercial_open_data",
+  "source_url": "https://solvana.example/open-data",
+  "license_identifier": "ODC-By-1.0",
+  "attribution": "SOLVANA open data, ODC-By 1.0"
+}

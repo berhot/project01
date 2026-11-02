@@ -1,0 +1,23 @@
+{
+  "status": "planned",
+  "endpoint_url": "https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com",
+  "profile": "r2",
+  "region": "auto",
+  "mappings": [
+    {
+      "local_directory": "storage/data",
+      "bucket": "berhot-data",
+      "prefix": ""
+    },
+    {
+      "local_directory": "storage/artifacts",
+      "bucket": "berhot-artifacts",
+      "prefix": ""
+    }
+  ],
+  "local_only": [
+    "storage/incoming",
+    "storage/cache",
+    "storage/tmp"
+  ]
+}
