@@ -1,0 +1,63 @@
+name: Sora Nano visual baseline
+
+on:
+  push:
+    branches: [feat/image-nano-foundation-mvp-20261102]
+    paths:
+      - 'models/sora/**'
+      - '.github/workflows/sora-nano-visual.yml'
+  pull_request:
+    paths:
+      - 'models/sora/**'
+      - '.github/workflows/sora-nano-visual.yml'
+  workflow_dispatch:
+
+jobs:
+  test-and-train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: models/sora/variants/nano/mvp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Train independent spatial-field baseline
+        run: |
+          python -m scripts.spatial_field train \
+            --steps 1100 --batch-size 24 --device cpu --cpu-threads 2 \
+            --output-root /tmp/sora-nano-artifacts
+      - name: Held-out six-prompt evaluation
+        run: |
+          CKPT=$(find /tmp/sora-nano-artifacts -type f -name checkpoint.pt | head -n 1)
+          test -n "$CKPT"
+          python -m scripts.spatial_field evaluate \
+            --checkpoint "$CKPT" --seed 42 --output-dir /tmp/sora-preview-seed42
+          python -m scripts.spatial_field evaluate \
+            --checkpoint "$CKPT" --seed 123 --output-dir /tmp/sora-preview-seed123
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          scores = []
+          for seed in (42,123):
+              report = json.loads(Path(f"/tmp/sora-preview-seed{seed}/report.json").read_text())
+              scores.append(report["mean_mask_iou"])
+          print("Mean IoUs:", scores)
+          if min(scores) < 0.90:
+              raise SystemExit("Spatial baseline failed held-out IoU threshold")
+          PY
+      - name: Upload genuine learned samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sora-spatial-visual-baseline
+          path: |
+            /tmp/sora-preview-seed42/
+            /tmp/sora-preview-seed123/
+          if-no-files-found: ignore
