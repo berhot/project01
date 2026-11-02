@@ -52,6 +52,40 @@ jobs:
           if min(scores) < 0.90:
               raise SystemExit("Spatial baseline failed held-out IoU threshold")
           PY
+      - name: Train learned layout DDPM (no external geometry at inference)
+        run: |
+          python -m scripts.layout_diffusion train \
+            --steps 2000 --batch-size 256 --device cpu --cpu-threads 2 \
+            --output-root /tmp/sora-layout-artifacts
+      - name: Evaluate learned layouts with trained spatial renderer
+        run: |
+          LAYOUT=$(find /tmp/sora-layout-artifacts -type f -name checkpoint.pt | head -n 1)
+          SPATIAL=$(find /tmp/sora-nano-artifacts -type f -name checkpoint.pt | head -n 1)
+          test -n "$LAYOUT" && test -n "$SPATIAL"
+          python -m scripts.layout_diffusion evaluate \
+            --layout-checkpoint "$LAYOUT" --spatial-checkpoint "$SPATIAL" \
+            --seed 42 --output-dir /tmp/sora-learned-layout-seed42
+          python -m scripts.layout_diffusion evaluate \
+            --layout-checkpoint "$LAYOUT" --spatial-checkpoint "$SPATIAL" \
+            --seed 123 --output-dir /tmp/sora-learned-layout-seed123
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          reports = [
+            json.loads(Path(f"/tmp/sora-learned-layout-seed{s}/report.json").read_text())
+            for s in (42, 123)
+          ]
+          assert all(len(r["items"]) == 6 for r in reports)
+          first = [i["generated_center_and_halfwidth"] for i in reports[0]["items"]]
+          second = [i["generated_center_and_halfwidth"] for i in reports[1]["items"]]
+          assert first != second, "Generated layouts must vary by seed"
+          for item in reports[0]["items"] + reports[1]["items"]:
+              x, y, half = item["generated_center_and_halfwidth"]
+              assert 6 <= half <= 10.5
+              assert 3 + half - 1e-3 <= x <= 29 - half + 1e-3
+              assert 3 + half - 1e-3 <= y <= 29 - half + 1e-3
+          print("Learned layout sampling, bounds, and six-prompt PNG export passed")
+          PY
       - name: Upload genuine learned samples
         if: always()
         uses: actions/upload-artifact@v4
@@ -60,4 +94,6 @@ jobs:
           path: |
             /tmp/sora-preview-seed42/
             /tmp/sora-preview-seed123/
+            /tmp/sora-learned-layout-seed42/
+            /tmp/sora-learned-layout-seed123/
           if-no-files-found: ignore
