@@ -12,6 +12,7 @@ import torch
 from ..paths import BERHOT_ROOT, TRAIN_ROOT, VAL_ROOT, validate_run_id
 from ..runtime import select_device, fingerprint, atomic_json, environment
 from .tokenizer import TextTokenizer
+from .multisentence import sample_index
 from .dataset import MelConfig, TTSDataset, collate_tts, inspect_sources, speaker_key
 from .acoustic_model import AcousticConfig, AcousticModel, acoustic_loss
 from .vocoder import VocoderConfig, Vocoder, reconstruction_loss
@@ -94,7 +95,7 @@ def train(train_source=None,val_source=None,steps=100,learning_rate=0.001,seed=4
     with CheckpointStop() as stop_control:
       for step in range(start+1,steps+1):
           acoustic.train();vocoder.train();optimizer.zero_grad(set_to_none=True)
-          item=data[(step-1)%len(data)]
+          item=data[sample_index(step,len(data),seed)]
           batch=collate_tts([item])
           a_loss,a_metrics=acoustic_loss(acoustic,batch)
           # Training crops are Mel-conditioned waveform examples, never inference playback.
