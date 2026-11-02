@@ -10,6 +10,7 @@ import torch
 
 from ..paths import BERHOT_ROOT, TRAIN_ROOT, VAL_ROOT, validate_run_id
 from ..runtime import select_device, fingerprint, atomic_json, environment
+from ..training_control import TrainingControl, accelerator_rng, restore_accelerator_rng
 from .tokenizer import TextTokenizer
 from .dataset import MelConfig, TTSDataset, collate_tts, inspect_sources, speaker_key
 from .acoustic_model import AcousticConfig, AcousticModel, acoustic_loss
@@ -31,7 +32,8 @@ def configs(options=None):
 
 
 def train(train_source=None,val_source=None,steps=100,learning_rate=0.001,seed=42,device_name='cpu',
-          config=None,resume=None,run_id=None,save_interval=25):
+          config=None,resume=None,run_id=None,save_interval=25,max_seconds=None):
+    control = TrainingControl(max_seconds)
     if steps<1 or save_interval<1 or not math.isfinite(learning_rate) or learning_rate<=0:
         raise ValueError('Invalid training arguments')
     random.seed(seed);torch.manual_seed(seed)
@@ -64,6 +66,7 @@ def train(train_source=None,val_source=None,steps=100,learning_rate=0.001,seed=4
         if steps<=start:raise ValueError('Target steps must exceed checkpoint step')
         torch.set_rng_state(checkpoint['torch_rng_state'])
         random.setstate(checkpoint['python_rng_state'])
+        restore_accelerator_rng(checkpoint.get('accelerator_rng',{}),device)
     run_id=validate_run_id(run_id or ('tts-'+time.strftime('%Y%m%dT%H%M%SZ',time.gmtime())+'-'+uuid.uuid4().hex[:8]))
     run=TTS_RUN_ROOT/run_id
     run.mkdir(parents=True,exist_ok=False)
@@ -71,38 +74,42 @@ def train(train_source=None,val_source=None,steps=100,learning_rate=0.001,seed=4
     atomic_json(run/'logs/run.json',{'schema_version':1,'task':'tts','run_id':run_id,'config':config_data,
                 'seed':seed,'learning_rate':optimizer.param_groups[0]['lr'],'requested_learning_rate':learning_rate,'resume':str(resume) if resume else None,'device':str(device),'environment':environment(),
                 'dataset_fingerprints':fingerprints,'source_manifest':records,'speakers':speakers,
-                'quality_status':'experimental-engineering-only','start_step':start,'target_steps':steps})
+                'quality_status':'experimental-engineering-only','start_step':start,'target_steps':steps,'max_seconds':max_seconds})
     started=time.monotonic()
-    for step in range(start+1,steps+1):
-        acoustic.train();vocoder.train();optimizer.zero_grad(set_to_none=True)
-        item=data[(step-1)%len(data)]
-        batch=collate_tts([item])
-        a_loss,a_metrics=acoustic_loss(acoustic,batch)
-        # Training crops are Mel-conditioned waveform examples, never inference playback.
-        frames=min(32,len(item['mel'])-1)
-        offset=random.randrange(max(1,len(item['mel'])-frames))
-        target=item['waveform'][offset*160:(offset+frames)*160]
-        condition=item['mel'][offset:offset+frames][None].to(device)
-        target=torch.nn.functional.pad(target,(0,frames*160-len(target)))[None].to(device)
-        predicted=vocoder(condition)
-        v_loss,v_metrics=reconstruction_loss(predicted,target)
-        loss=a_loss+v_loss.to(device)
-        if not torch.isfinite(loss):raise FloatingPointError('Non-finite TTS loss')
-        loss.backward();torch.nn.utils.clip_grad_norm_(list(acoustic.parameters())+list(vocoder.parameters()),1.0)
-        optimizer.step()
-        record={'step':step,'loss':float(loss.detach()),**a_metrics,**v_metrics}
-        with (run/'logs/metrics.jsonl').open('a') as file:file.write(json.dumps(record)+'\n')
-        if step==start+1 or step%save_interval==0 or step==steps:
-            print(json.dumps(record),flush=True)
-            checkpoint={'schema_version':1,'task':'tts','run_id':run_id,'step':step,
-                'epoch':(step-1)//len(data)+1,'acoustic':acoustic.state_dict(),'vocoder':vocoder.state_dict(),
-                'optimizer':optimizer.state_dict(),'config':config_data,'tokenizer':tokenizer.to_dict(),'speakers':speakers,
-                'dataset_fingerprints':fingerprints,'source_manifest':records,'torch_rng_state':torch.get_rng_state(),
-                'python_rng_state':random.getstate(),'seed':seed,'environment':environment()}
-            path=run/'checkpoints'/f'step_{step:06d}.pt';temp=path.with_suffix('.tmp')
-            try:torch.save(checkpoint,temp);temp.replace(path)
-            finally:temp.unlink(missing_ok=True)
-    atomic_json(run/'logs/summary.json',{'checkpoint':str(path),'steps':steps,'training_seconds':time.monotonic()-started,
+    stop_reason = None
+    with control:
+        for step in range(start+1,steps+1):
+            acoustic.train();vocoder.train();optimizer.zero_grad(set_to_none=True)
+            item=data[(step-1)%len(data)]
+            batch=collate_tts([item])
+            a_loss,a_metrics=acoustic_loss(acoustic,batch)
+            # Training crops are Mel-conditioned waveform examples, never inference playback.
+            frames=min(32,len(item['mel'])-1)
+            offset=random.randrange(max(1,len(item['mel'])-frames))
+            target=item['waveform'][offset*160:(offset+frames)*160]
+            condition=item['mel'][offset:offset+frames][None].to(device)
+            target=torch.nn.functional.pad(target,(0,frames*160-len(target)))[None].to(device)
+            predicted=vocoder(condition)
+            v_loss,v_metrics=reconstruction_loss(predicted,target)
+            loss=a_loss+v_loss.to(device)
+            if not torch.isfinite(loss):raise FloatingPointError('Non-finite TTS loss')
+            loss.backward();torch.nn.utils.clip_grad_norm_(list(acoustic.parameters())+list(vocoder.parameters()),1.0,error_if_nonfinite=True)
+            optimizer.step()
+            record={'step':step,'loss':float(loss.detach()),**a_metrics,**v_metrics}
+            with (run/'logs/metrics.jsonl').open('a') as file:file.write(json.dumps(record)+'\n')
+            stop_reason = control.reason()
+            if step==start+1 or step%save_interval==0 or step==steps or stop_reason:
+                print(json.dumps(record),flush=True)
+                checkpoint={'schema_version':1,'task':'tts','run_id':run_id,'step':step,
+                    'epoch':(step-1)//len(data)+1,'acoustic':acoustic.state_dict(),'vocoder':vocoder.state_dict(),
+                    'optimizer':optimizer.state_dict(),'config':config_data,'tokenizer':tokenizer.to_dict(),'speakers':speakers,
+                    'dataset_fingerprints':fingerprints,'source_manifest':records,'torch_rng_state':torch.get_rng_state(),
+                    'python_rng_state':random.getstate(),'accelerator_rng':accelerator_rng(device),'seed':seed,'environment':environment()}
+                path=run/'checkpoints'/f'step_{step:06d}.pt';temp=path.with_suffix('.tmp')
+                try:torch.save(checkpoint,temp);temp.replace(path)
+                finally:temp.unlink(missing_ok=True)
+            if stop_reason: break
+    atomic_json(run/'logs/summary.json',{'checkpoint':str(path),'steps':step,'target_steps':steps,'status':stop_reason or 'completed','training_seconds':time.monotonic()-started,
                 'parameters':{'acoustic':sum(p.numel() for p in acoustic.parameters()),'vocoder':sum(p.numel() for p in vocoder.parameters())},
                 'training_recordings':len(data),'validation_recordings':len(validation),'last_metrics':record})
     print('Checkpoint:',path,flush=True)
