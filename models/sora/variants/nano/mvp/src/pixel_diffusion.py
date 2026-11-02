@@ -154,24 +154,54 @@ def noise_schedule(config,device):
     return beta,alpha,alpha.cumprod(0)
 
 
-def training_loss(model,images,tokens):
+def apply_text_dropout(tokens, probability):
+    """Classifier-free training: replace entire prompts with null condition."""
+    if not 0 <= probability <= 1 or not math.isfinite(probability):
+        raise ValueError("Text dropout probability must be between 0 and 1")
+    if tokens.ndim != 2 or tokens.shape[1] != 12:
+        raise ValueError("Expected [B,12] token batch")
+    mask = torch.rand(len(tokens), device=tokens.device) < probability
+    result = tokens.clone()
+    result[mask] = 0
+    return result, mask
+
+
+def guided_noise(model, noisy, times, tokens, guidance_scale=1.0):
+    """Epsilon-space CFG, scale 1 = conditional only; scale 0 = unconditional."""
+    if not math.isfinite(guidance_scale) or not 0 <= guidance_scale <= 20:
+        raise ValueError("guidance_scale must be between 0 and 20")
+    if guidance_scale == 1.0:
+        return model(noisy, times, tokens)
+    prediction = model(
+        torch.cat([noisy, noisy], dim=0),
+        torch.cat([times, times], dim=0),
+        torch.cat([torch.zeros_like(tokens), tokens], dim=0),
+    )
+    unconditional, conditioned = prediction.chunk(2, dim=0)
+    return unconditional + guidance_scale * (conditioned - unconditional)
+
+
+def training_loss(model,images,tokens,cfg_drop_prob=0.0):
     if images.ndim!=4 or images.shape[1:]!=(3,32,32): raise ValueError("Expected 32x32 RGB")
     _,_,cumulative=noise_schedule(model.config,images.device)
     times=torch.randint(0,model.config.diffusion_steps,(len(images),),device=images.device)
     eps=torch.randn_like(images)
     a=cumulative[times][:,None,None,None]
     noisy=a.sqrt()*images+(1-a).sqrt()*eps
-    return F.mse_loss(model(noisy,times,tokens),eps)
+    conditioned, _ = apply_text_dropout(tokens, cfg_drop_prob)
+    return F.mse_loss(model(noisy,times,conditioned),eps)
 
 
 @torch.no_grad()
-def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mean"):
+def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mean",guidance_scale=1.0):
     """Generate pixels from learned diffusion.
 
     'posterior_mean': full-step DDPM posterior mean without added variance
     (deterministic, often sharper on the toy task, not an unbiased DDPM sample).
     'ddim': deterministic DDIM with optional timestep skipping.
     """
+    if not math.isfinite(guidance_scale) or not 0 <= guidance_scale <= 20:
+        raise ValueError("guidance_scale must be between 0 and 20")
     total=model.config.diffusion_steps
     if sampler not in ("posterior_mean","ddim"):
         raise ValueError("Unsupported diffusion sampler")
@@ -189,7 +219,7 @@ def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mea
     model.eval()
     if sampler=="posterior_mean":
         for t in range(total-1,-1,-1):
-            eps=model(x,torch.tensor([t],device=device,dtype=torch.long),tokens)
+            eps=guided_noise(model,x,torch.tensor([t],device=device,dtype=torch.long),tokens,guidance_scale)
             a=cum[t]
             x0=((x-(1-a).sqrt()*eps)/a.sqrt()).clamp(-1,1)
             if t==0: x=x0
@@ -201,7 +231,7 @@ def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mea
     else:
         timesteps=torch.linspace(total-1,0,steps).round().long().unique_consecutive()
         for i,t in enumerate(timesteps.tolist()):
-            eps=model(x,torch.tensor([t],device=device,dtype=torch.long),tokens)
+            eps=guided_noise(model,x,torch.tensor([t],device=device,dtype=torch.long),tokens,guidance_scale)
             a=cum[t]
             x0=((x-(1-a).sqrt()*eps)/a.sqrt()).clamp(-1,1)
             if i+1==len(timesteps): x=x0
