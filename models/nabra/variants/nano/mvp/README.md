@@ -40,7 +40,17 @@ paths and generated WAV links describe local outputs; a fresh clone must train
 and package models or retrieve those artifacts separately. No R2 upload or model
 deployment has been performed.
 
-Publication status is recorded below after GitHub confirms the push.
+### Git delivery record
+
+- Implementation commit: [`1171e61`](https://github.com/berhot/project01/commit/1171e61e4e3457395c754877af1392ac009fcb66).
+- Destination: `origin/main` at `https://github.com/berhot/project01.git`.
+- Push result on 2026-11-02 (Asia/Riyadh): successful; GitHub accepted the update
+  from `2393b08` to `1171e61`, and local `main` tracks `origin/main`.
+- This delivery record is a follow-up documentation commit to the implementation
+  commit above. Test results above refer to the completed implementation run;
+  subsequent changes only added documentation.
+- Local generated release bundles and absolute-path intake manifests remain
+  untracked and were not published to GitHub.
 
 ## Setup and tests
 
