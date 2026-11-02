@@ -11,6 +11,107 @@ provenance is recorded in `intake/speech/synthetic-samples.json`. The TTS model
 implemented here generates its own waveform from neural weights and text. It
 does not call `say`, use a speech API, or replay the training recordings.
 
+## Later: record your own Saudi Arabic voice for multi-sentence TTS
+
+**Status: prepared, not yet recorded or trained.** The new recording workflow was
+adapted from `berhot/berhot-ai/jsm-voice`. See
+[NABRA_VOICE_RECORDING.md](NABRA_VOICE_RECORDING.md) for details and
+[NABRA_MULTISENTENCE_TTS.md](NABRA_MULTISENTENCE_TTS.md) for training notes.
+This section is for when you're ready; it does **not** change old releases,
+diagnostic checkpoints, or the original BERHOT working directory.
+
+### 1. Check out the voice-recorder worktree (once)
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git fetch origin
+git worktree add ../BERHOT-nabra-record \
+  -b review/nabra-voice-record \
+  origin/feat/nabra-voice-recorder-port-20261102
+cd ../BERHOT-nabra-record/models/nabra/variants/nano/mvp
+/Users/farisalsaiari/Desktop/BERHOT/.venv/bin/python -m unittest tests.test_tts_voice_recorder -v
+/Users/farisalsaiari/Desktop/BERHOT/.venv/bin/python -m unittest discover -s tests -v
+```
+
+If the worktree already exists, enter it and use `git pull --ff-only`
+instead of creating it again. These steps work with the PR branch until it is merged;
+afterwards use the updated project checkout.
+
+### 2. Prepare the microphone (once)
+
+```bash
+source /Users/farisalsaiari/Desktop/BERHOT/.venv/bin/activate
+python3 -m pip install sounddevice
+```
+
+Grant Terminal microphone permission on macOS when prompted. NumPy is also
+required (already used elsewhere in Nabra).
+
+### 3. Record; resume with the same command later
+
+```bash
+python3 -m scripts.tts_record_voice \
+  --speaker fahad \
+  --prompts data/voice_prompts/saudi_starter.txt \
+  --consent
+```
+
+Replace `fahad` with your chosen speaker identifier. Only record yourself or
+someone who explicitly agreed to voice-model training. The starter set has
+30 original Arabic sentences. At each prompt, Enter starts/stops recording;
+save the take, use `r` to redo, `s` to skip, or `q` to quit.
+Repeat the same command later to resume without overwriting accepted takes.
+Your microphone originals are stored locally at
+`BERHOT/storage/voice_corpus/nabra/<speaker>/` (22,050 Hz PCM16).
+Do not commit private voice recordings to this public GitHub repository.
+
+### 4. Export the recordings and prepare the 16 kHz training corpus
+
+Run from the recording worktree's Nabra MVP directory:
+
+```bash
+ROOT=/Users/farisalsaiari/Desktop/BERHOT
+python3 -m scripts.tts_record_voice \
+  --speaker fahad \
+  --prompts data/voice_prompts/saudi_starter.txt \
+  --consent \
+  --export-index "$ROOT/storage/voice_corpus/nabra/fahad/source-index-v1.jsonl"
+
+python3 -m scripts.prepare_corpus \
+  --index "$ROOT/storage/voice_corpus/nabra/fahad/source-index-v1.jsonl" \
+  --output "$ROOT/storage/data/processed/audio/nabra-fahad-v1" \
+  --val-fraction 0.2 --seed 42
+
+python3 -m scripts.tts_preflight_multi \
+  --train-source "$ROOT/storage/data/processed/audio/nabra-fahad-v1/train.jsonl" \
+  --val-source "$ROOT/storage/data/processed/audio/nabra-fahad-v1/val.jsonl" \
+  --strict
+```
+
+The export and conversion preserve source WAVs and refuse to overwrite
+existing output versions. The built-in 30 prompts are a pipeline pilot;
+**100–300 varied, accurately transcribed consented recordings** are a more
+useful first training experiment, and still not a guarantee of intelligible
+speech. For additional sentences, plan a separate prompt-list/session
+workflow rather than changing the list in an already-started session.
+
+### 5. Train a fresh experimental multi-sentence Nabra TTS run
+
+Only after corpus preflight passes on a sufficiently varied dataset:
+
+```bash
+python3 -m scripts.tts_train \
+  --train-source "$ROOT/storage/data/processed/audio/nabra-fahad-v1/train.jsonl" \
+  --val-source "$ROOT/storage/data/processed/audio/nabra-fahad-v1/val.jsonl" \
+  --steps 500 --save-interval 25 --device cpu --threads 2
+```
+
+Evaluate the checkpoint on held-out recordings and listen to new Arabic
+sentences before deciding whether to scale training. The recovered
+single-sentence overfit checkpoints are **not** a general-purpose TTS release.
+No actual speaker recording, real-data training, or intelligibility verification
+has been performed as part of this documentation change.
+
 ## TTS quality recovery — 2026-11-02
 
 The original TTS `0.1.0` output was heard as noise. Bounded recovery experiments
