@@ -185,3 +185,54 @@ The model is deliberately constrained. **It cannot compose arbitrary
 posters, logos, lettering, scenes, or open-vocabulary prompts**, and its
 geometry is supplied externally. Treat it as a quality-control milestone
 for the next, more general image-generation architecture, not a release.
+
+## Learned layout DDPM + learned neural renderer
+
+The previous `spatial-field-v1` requires external (x, y, size). The next
+experiment `layout-ddpm-v1` **learns a probability distribution over those
+three geometry parameters** from synthetic training examples and generates
+them from seeded diffusion noise at inference. The separate, already-trained
+`spatial-field-v1` then predicts the 32×32 image pixels from its weights.
+
+The inference path **does not call** `layout_for_seed()`,
+`synthetic_image()`, or `training_layouts()`. Different seeds can generate
+different learned positions and sizes for the same six text labels. The
+geometry bounds are still hard constraints, and the model is explicitly
+**not diffusion over images**, nor an open-ended text-to-image foundation model.
+
+### Reproduce in the original BERHOT folder
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+# First train the spatial renderer (skip if you already have a valid checkpoint).
+python3 -m scripts.spatial_field train --steps 1100 --batch-size 24 --device cpu
+
+# Independently train the learned layout prior.
+python3 -m scripts.layout_diffusion train \
+  --steps 2000 --batch-size 256 --device cpu --cpu-threads 2
+
+# Select existing checkpoints from these two different architectures.
+SPATIAL=$(find storage/artifacts/sora/nano/mvp \
+  -path '*/spatial-*/checkpoint.pt' -type f | sort | tail -1)
+LAYOUT=$(find storage/artifacts/sora/nano/mvp \
+  -path '*/layout-*/checkpoint.pt' -type f | sort | tail -1)
+test -f "$SPATIAL" && test -f "$LAYOUT"
+
+python3 -m scripts.layout_diffusion evaluate \
+  --layout-checkpoint "$LAYOUT" \
+  --spatial-checkpoint "$SPATIAL" \
+  --seed 42 --output-dir /tmp/sora-learned-layout-seed42
+open /tmp/sora-learned-layout-seed42/preview_grid.png
+```
+
+Both checkpoint files must have their correct architecture tags. Older
+CVAE/DDPM checkpoints are **not interchangeable**. The evaluator writes six
+model-generated images and a JSON report with generated geometry. Do not
+confuse a matching six-class toy-model result with real image/design ability.
+Future work needs image-level diffusion on licensed image-caption datasets,
+multi-object composition, and genuine Arabic/English language conditioning.
