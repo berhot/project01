@@ -63,11 +63,14 @@ class PixelDiffusionTests(unittest.TestCase):
                 "model":net.state_dict(),
             },path)
             restored=load_model(path)
-            a=generate(net,"red circle",seed=7,steps=4)
-            b=generate(restored,"red circle",seed=7,steps=4)
+            a=generate(net,"red circle",seed=7,steps=4,sampler="ddim")
+            b=generate(restored,"red circle",seed=7,steps=4,sampler="ddim")
             self.assertTrue(torch.equal(a,b))
             self.assertEqual(tuple(a.shape),(3,32,32))
-            evaluate(restored,root/"preview",seed=42,sample_steps=4,scale=1)
+            posterior=generate(restored,"دائرة حمراء",seed=7,sampler="posterior_mean")
+            self.assertEqual(tuple(posterior.shape),(3,32,32))
+            self.assertTrue(torch.isfinite(posterior).all())
+            evaluate(restored,root/"preview",seed=42,sample_steps=4,scale=1,sampler="ddim")
             self.assertEqual(len(list((root/"preview").glob("*.png"))),13)
             self.assertTrue((root/"preview"/"report.json").is_file())
             with self.assertRaises(FileExistsError):
@@ -78,7 +81,9 @@ class PixelDiffusionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             generate(model,"horse on a beach",steps=4)
         with self.assertRaises(ValueError):
-            generate(model,"red circle",steps=1)
+            generate(model,"red circle",steps=1,sampler="ddim")
+        with self.assertRaises(ValueError):
+            generate(model,"red circle",steps=4,sampler="posterior_mean")
         with tempfile.TemporaryDirectory() as d:
             bad=Path(d)/"bad.pt"
             torch.save({"schema_version":1,"architecture":"layout-ddpm-v1"},bad)
