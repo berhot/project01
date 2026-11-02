@@ -1,8 +1,9 @@
 # NABRA Nano voice MVP
 
 Experimental ASR, from-scratch TTS, and bounded-buffer microphone recognition.
-Read [NABRA_MVP_COMPLETION_REPORT.md](NABRA_MVP_COMPLETION_REPORT.md) for measured
-results and unresolved verification. These models are not production-quality speech systems.
+Read the current [TTS quality recovery report](NABRA_TTS_QUALITY_RECOVERY_REPORT.md)
+and the historical [MVP completion report](NABRA_MVP_COMPLETION_REPORT.md).
+These models are not production-quality speech systems.
 
 The current shared corpus has two training clips and one validation clip. All
 three are synthetic Arabic speech generated earlier with macOS `say`; their
@@ -10,7 +11,54 @@ provenance is recorded in `intake/speech/synthetic-samples.json`. The TTS model
 implemented here generates its own waveform from neural weights and text. It
 does not call `say`, use a speech API, or replay the training recordings.
 
-## Implementation and verification report — 2026-11-02
+## TTS quality recovery — 2026-11-02
+
+The original TTS `0.1.0` output was heard as noise. Bounded recovery experiments
+isolated vocoder reconstruction failure and a teacher-forcing/inference gap. An
+optional learned complex-spectral vocoder head, phase-sensitive supervision, and
+free-running acoustic training recovered the existing training sentence. A final
+acoustic refinement through the frozen vocoder reduced the background hiss.
+
+The user listened to the final text-to-speech output and confirmed:
+
+> words clear , hiss reduced not 100% quality
+
+**Single-sentence Arabic intelligibility: PASS. Release readiness: FAIL.**
+Residual hiss remains, unseen-text pronunciation is unverified, and this is an
+overfit proof on one existing synthetic recording. The separate ground-truth-Mel
+vocoder sample still awaits direct human listening. No release was replaced or created.
+
+| Check | Observed result |
+| --- | --- |
+| Ground-truth-Mel vocoder | 22.68 dB aligned SNR, waveform MAE 0.00700 |
+| Free-running acoustic learning | Mel MAE fell from 0.32648 to 0.05232 in Experiment B; 440 predicted / 438 target frames |
+| Refined full neural synthesis | 4.40 seconds, 16.26 dB aligned SNR, no clipping |
+| Noise refinement | Quiet-region residual RMS fell about 30%; user reports reduced hiss |
+| Full regression suite | 72 passed, 0 failed, 0 skipped with optional MPS checks enabled |
+| Preservation | 137 historical data/artifact/release files unchanged; original TTS WAV remains byte-identical |
+
+From this MVP directory:
+
+```bash
+python -m pip install -r requirements-diagnostics.txt
+ROOT=$(git rev-parse --show-toplevel)
+ART="$ROOT/storage/artifacts/nabra/tts/nano/mvp"
+afplay "$ART/recovery-full-002/samples/tts_full_overfit.wav"
+afplay "$ART/recovery-vocoder-phase-001/samples/vocoder_reconstruction.wav"
+```
+
+The complete [recovery report](NABRA_TTS_QUALITY_RECOVERY_REPORT.md) records the
+root-cause evidence, every bounded experiment, checkpoint/audio hashes, human
+feedback, measured timings, playback paths, tests and remaining limitations.
+Use `scripts.tts_overfit_vocoder`, `scripts.tts_overfit_acoustic`, and
+`scripts.tts_overfit_full` for diagnostics; all support `--help`. Training supports
+explicit step limits, seed, learning rate, device, periodic samples and resume.
+Use new run IDs for additional experiments. The source and report are versioned;
+generated WAVs, tensors, figures and checkpoints remain in local artifact storage.
+
+## Historical implementation report — before TTS quality recovery
+
+The following records the earlier delivery; current TTS findings are above.
 
 | Workstream | Delivered | Verification |
 | --- | --- | --- |
@@ -248,7 +296,7 @@ Queue overflow fails explicitly rather than silently dropping/reordering audio.
 
 No production-quality Arabic ASR/TTS claim is made. The current corpus uses a
 single synthetic voice; dialect, gender, speaker, and recording-environment
-coverage are absent. A representative human-recorded training corpus and human listening review
+coverage are absent. A representative human-recorded training corpus and broader listening evaluation
 are still needed; the three additional human fixtures only establish integration. The live microphone check opened successfully but encountered no
 speech, so live spoken transcription remains to be verified.
 

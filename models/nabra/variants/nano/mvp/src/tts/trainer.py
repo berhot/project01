@@ -53,7 +53,10 @@ def train(train_source=None,val_source=None,steps=100,learning_rate=0.001,seed=4
         checkpoint=torch.load(resume,map_location='cpu',weights_only=True)
         if checkpoint.get('schema_version')!=1 or checkpoint.get('task')!='tts':raise ValueError('Invalid TTS checkpoint')
         if checkpoint['dataset_fingerprints']!=fingerprints:raise ValueError('TTS dataset mismatch')
-        if checkpoint['config']!=config_data or checkpoint['speakers']!=speakers:raise ValueError('TTS config mismatch')
+        restored_config = dict(checkpoint['config'])
+        if 'vocoder' in restored_config:
+            restored_config['vocoder'] = asdict(VocoderConfig(**restored_config['vocoder']))
+        if restored_config!=config_data or checkpoint['speakers']!=speakers:raise ValueError('TTS config mismatch')
         if checkpoint['tokenizer']!=tokenizer.to_dict():raise ValueError('TTS tokenizer mismatch')
         acoustic.load_state_dict(checkpoint['acoustic']);vocoder.load_state_dict(checkpoint['vocoder'])
         optimizer.load_state_dict(checkpoint['optimizer'])

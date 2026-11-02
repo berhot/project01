@@ -51,7 +51,8 @@ class AcousticModel(nn.Module):
         mel=self.mel(joined).reshape(-1,self.config.reduction,self.config.n_mels)
         return mel,self.stop(joined).squeeze(-1),state,attention
 
-    def forward(self,tokens,text_lengths,speakers,targets):
+    def forward(self,tokens,text_lengths,speakers,targets,teacher_forcing_ratio=1.0):
+        if not 0 <= teacher_forcing_ratio <= 1: raise ValueError("Invalid teacher forcing ratio")
         memory,keys,mask,state=self.encode(tokens,text_lengths,speakers)
         previous=targets.new_zeros((len(tokens),self.config.n_mels))
         cumulative=targets.new_zeros(mask.shape)
@@ -60,29 +61,35 @@ class AcousticModel(nn.Module):
             mel,stop,state,attention=self.step(previous,state,memory,keys,mask,cumulative)
             mels.append(mel);stops.append(stop);attentions.append(attention)
             cumulative=cumulative+attention
-            previous=targets[:,min(start+self.config.reduction,targets.shape[1])-1]
+            teacher=targets[:,min(start+self.config.reduction,targets.shape[1])-1]
+            previous=teacher if teacher_forcing_ratio==1 else mel[:,-1]
+            if 0 < teacher_forcing_ratio < 1:
+                choose=torch.rand((len(tokens),1),device=targets.device)<teacher_forcing_ratio
+                previous=torch.where(choose,teacher,mel[:,-1])
         return torch.cat(mels,1)[:,:targets.shape[1]],torch.stack(stops,1),torch.stack(attentions,1)
 
     @torch.inference_mode()
-    def generate(self,tokens,speaker=0,max_frames=800,min_frames=20):
+    def generate(self,tokens,speaker=0,max_frames=800,min_frames=20,return_attention=False):
         if tokens.ndim!=2 or tokens.shape[0]!=1: raise ValueError('Synthesis expects one text')
         if not 1<=min_frames<=max_frames<=4000: raise ValueError('Invalid synthesis frame limits')
         lengths=torch.tensor([tokens.shape[1]])
         memory,keys,mask,state=self.encode(tokens,lengths,torch.tensor([speaker],device=tokens.device))
         previous=memory.new_zeros((1,self.config.n_mels));cumulative=memory.new_zeros(mask.shape)
-        frames=[];stopped=False
+        frames=[];attentions=[];stopped=False
         for start in range(0,max_frames,self.config.reduction):
             mel,stop,state,attention=self.step(previous,state,memory,keys,mask,cumulative)
-            cumulative=cumulative+attention;frames.append(mel);previous=mel[:,-1]
+            cumulative=cumulative+attention;frames.append(mel);attentions.append(attention);previous=mel[:,-1]
             if start+self.config.reduction>=min_frames and stop.sigmoid().item()>0.5:
                 stopped=True;break
-        return torch.cat(frames,1)[:,:max_frames],{'stop_predicted':stopped,'frame_limit_reached':not stopped}
+        info={'stop_predicted':stopped,'frame_limit_reached':not stopped}
+        if return_attention: info['attention']=torch.stack(attentions,1)
+        return torch.cat(frames,1)[:,:max_frames],info
 
 
-def acoustic_loss(model,batch):
+def acoustic_loss(model,batch,teacher_forcing_ratio=1.0,return_prediction=False):
     device=next(model.parameters()).device
     tokens=batch['tokens'].to(device);target=batch['mel'].to(device);lengths=batch['mel_lengths'].to(device)
-    predicted,stop,attention=model(tokens,batch['text_lengths'],batch['speaker'].to(device),target)
+    predicted,stop,attention=model(tokens,batch['text_lengths'],batch['speaker'].to(device),target,teacher_forcing_ratio=teacher_forcing_ratio)
     mask=torch.arange(target.shape[1],device=device)[None,:]<lengths[:,None]
     mel=((predicted-target).abs()*mask[:,:,None]).sum()/(mask.sum()*target.shape[-1])
     steps=(lengths+model.config.reduction-1)//model.config.reduction
@@ -97,4 +104,5 @@ def acoustic_loss(model,batch):
     valid_attention=valid[:,:,None] & (torch.arange(tokens.shape[1],device=device)[None,None,:]<text_lengths[:,None,None])
     guided=(attention*guide*valid_attention).sum()/valid.sum()
     total=mel+0.2*stop_loss+0.1*guided
-    return total,{'mel_l1':float(mel.detach()),'stop_bce':float(stop_loss.detach()),'guided_attention':float(guided.detach())}
+    metrics={'mel_l1':float(mel.detach()),'stop_bce':float(stop_loss.detach()),'guided_attention':float(guided.detach())}
+    return (total,metrics,predicted) if return_prediction else (total,metrics)
