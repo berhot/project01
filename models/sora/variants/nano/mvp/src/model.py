@@ -59,8 +59,9 @@ class Config:
     size: int = 32
     channels: int = 32
     diffusion_steps: int = 50
+    schedule_version: str = "cosine_v1"
     def __post_init__(self):
-        if self.size != 32 or self.channels < 8 or self.diffusion_steps < 2:
+        if self.size != 32 or self.channels < 8 or self.diffusion_steps < 2 or self.schedule_version != "cosine_v1":
             raise ValueError("Unsupported image diffusion configuration")
 
 
@@ -92,7 +93,11 @@ class Denoiser(nn.Module):
 
 
 def schedule(config, device):
-    beta = torch.linspace(0.0001, 0.02, config.diffusion_steps, device=device)
+    """Cosine noise schedule with near-zero final signal-to-noise ratio."""
+    t = torch.linspace(0, 1, config.diffusion_steps + 1, device=device, dtype=torch.float64)
+    alphas = torch.cos((t + 0.008) / 1.008 * math.pi / 2).square()
+    alphas = alphas / alphas[0]
+    beta = (1 - alphas[1:] / alphas[:-1]).clamp(0.0001, 0.999).float()
     alpha = 1 - beta
     return beta, alpha, alpha.cumprod(dim=0)
 
@@ -121,7 +126,8 @@ def sample(model, label, seed=42, device="cpu"):
         estimate = model(x, t, labels)
         x = (x - beta[i] / (1 - cumulative[i]).sqrt() * estimate) / alpha[i].sqrt()
         if i:
-            x = x + beta[i].sqrt() * torch.randn(x.shape, generator=generator, device=device)
+            posterior_var = beta[i] * (1 - cumulative[i - 1]) / (1 - cumulative[i])
+            x = x + posterior_var.sqrt() * torch.randn(x.shape, generator=generator, device=device)
     return x.clamp(-1, 1).cpu()[0]
 
 
