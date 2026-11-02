@@ -236,3 +236,78 @@ model-generated images and a JSON report with generated geometry. Do not
 confuse a matching six-class toy-model result with real image/design ability.
 Future work needs image-level diffusion on licensed image-caption datasets,
 multi-object composition, and genuine Arabic/English language conditioning.
+
+## RGB pixel-space diffusion + Arabic/English word conditioning (experimental)
+
+The file `src/pixel_diffusion.py` is the **first actual image-level diffusion**
+in this family: training noise is added to every RGB pixel in a 32×32 image,
+a trainable multiscale U-Net estimates the noise, and inference begins from
+Gaussian image noise and denoises into pixels using DDIM. **Neither a spatial
+shape renderer nor a geometry DDPM is called during inference.**
+
+Prompts are encoded using **trainable word embeddings**, with independent Arabic
+and English vocabulary entries and learned positional features. Arabic prompt
+handling is not hardcoded translation to six integer caption IDs.
+For example, supported prompts include `red circle`, `a red square on white
+background`, `دائرة حمراء`, `مربع أزرق`, and `مربع أخضر على خلفية بيضاء`.
+Out-of-vocabulary prompts deliberately fail with a clear error rather than
+pretending the model understands an arbitrary request.
+
+**Current dataset:** only six combinations of red/green/blue × circle/square,
+with randomized object placements, sizes, caption phrasing, and either Arabic
+or English descriptions. Training images are procedurally generated in Python
+and require no external sources. There are **no pretrained image models,
+remote image APIs, or inference-time procedural graphics**.
+
+### Run from the original BERHOT folder
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+# Initial full experiment (may be slow on CPU):
+python3 -m scripts.pixel_diffusion train \
+  --steps 3000 --batch-size 12 --device cpu --cpu-threads 2
+```
+
+Copy the actual `pixel-.../checkpoint.pt` path printed by training:
+
+```bash
+CKPT=$(find storage/artifacts/sora/nano/mvp \
+  -path '*/pixel-*/checkpoint.pt' -type f | sort | tail -1)
+test -f "$CKPT"
+
+python3 -m scripts.pixel_diffusion sample \
+  --checkpoint "$CKPT" --prompt 'دائرة حمراء' \
+  --seed 42 --sample-steps 50 \
+  --output /tmp/sora-pixel-arabic.png
+
+OUT="/tmp/sora-pixel-eval-$(date +%s)"
+python3 -m scripts.pixel_diffusion evaluate \
+  --checkpoint "$CKPT" --seed 42 --sample-steps 50 \
+  --output-dir "$OUT"
+open "$OUT/preview_grid.png"
+```
+
+The evaluation exports 12 **real model-sampled PNGs** covering all six concepts
+in both languages, along with a JSON report. It does **not** certify visual
+quality. Saving into an existing output location is intentionally rejected.
+
+### Known limitations and results
+
+The first independent 850-step CPU training run of an early 16-channel
+pixel-U-Net reached noise MSE ~0.07, but **images were still visibly noisy and
+not recognizable**. This is a real failure of image fidelity despite correct
+end-to-end software operation. It is not appropriate to merge or ship this
+as a visually successful diffusion model. The new GitHub CI uses only a
+short **smoke training run** and tests checkpoint → inference → PNG export.
+The smoke run cannot establish image quality. Longer experiments, stronger
+denoising objectives, better spatial/semantic conditioning, additional data,
+quantitative quality measures, and visual review remain required.
+
+Do not confuse this image-level diffusion with `layout-ddpm-v1`, which
+diffuses only three geometry parameters, or with the shape CVAE and neural
+renderer. All baselines are preserved separately.
