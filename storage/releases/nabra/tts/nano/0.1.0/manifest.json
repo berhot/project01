@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "task": "tts",
+  "version": "0.1.0",
+  "source_checkpoint_sha256": "f884416b58fd37937b943caa04dbdb0e8aec1e11c2e94a0866b4736fcd52b641",
+  "source_run_id": "tts-mvp-verification-002",
+  "step": 500,
+  "dataset_fingerprints": {
+    "train": "0cd8bee207beae686af617ed7c3aff1fbc745b341dbaa5ac8e9209fe1518e921",
+    "val": "d3313e50d974e552bd33a7abc7c242b16dece852d346397a36ab0b3ae9636773"
+  },
+  "approval": {
+    "approved": true,
+    "max_mel_l1": 1.0,
+    "max_spectral_loss": 5.0
+  },
+  "quality_status": "experimental-engineering-release",
+  "production_ready": false,
+  "files": {
+    "acoustic.safetensors": "9a1e77b6a6cecb530f09b11cf964c70edb1e4a51d8549cdc33e2eb9e164a0ef2",
+    "config.json": "d18fc10db3bd1530290311c108eade560ea83cf63a22f0db73dfeaee2c7e439e",
+    "evaluation.json": "d052fad4220ad05fe70269e0c8f5588898373face453c5e276f3e02007b59f88",
+    "speakers.json": "74df0bb9f3e406e460c28431eff3d48cc5a274fed5728ae099183392ac0f06d0",
+    "tokenizer.json": "5c5b33a9aad0b06518aecf0c1e88cb54aa37f9696d7a7ff88450204ced7811a3",
+    "vocoder.safetensors": "34563fec8563c09670585ab9d2482d792124ffe439fdc75a05497371378bbc39"
+  }
+}

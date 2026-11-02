@@ -1,0 +1,18 @@
+{
+  "model": {
+    "n_mels": 80,
+    "vocab_size": 22,
+    "hidden_size": 128,
+    "num_layers": 2,
+    "dropout": 0.1
+  },
+  "features": {
+    "sample_rate": 16000,
+    "n_fft": 400,
+    "hop_length": 160,
+    "n_mels": 80,
+    "f_min": 0.0,
+    "f_max": 8000.0
+  },
+  "task": "automatic-speech-recognition"
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "model_family": "nabra",
+  "variant": "nano",
+  "version": "0.1.0",
+  "source_run_id": "nabra-20261102T090710Z-a414c216",
+  "epoch": 10,
+  "created_at": "2026-11-02T09:12:35.226766+00:00",
+  "approval": {
+    "approved": true,
+    "method": "explicit-cli-approval",
+    "maximum_cer": 1.0
+  },
+  "evaluation": {
+    "cer": 1.0,
+    "wer": 1.0,
+    "checkpoint_sha256": "b6c0547aab560acd592af38e9ba4cfdd4da1c12314cfd3b1a93a439b9b5f42e6"
+  },
+  "files": {
+    "model.safetensors": "8b7abd641ad626c611204c45f8110c90b57242a8c58f06642097f710d515fd2e",
+    "config.json": "85168da526cd3697fd7616f35eeb15a4a0ee331410ce4160595c9e9ba1e494f8",
+    "tokenizer.json": "0ac8d909fbd594b938dad8623cf804572832d928251c8992328a2da71ca17136"
+  }
+}

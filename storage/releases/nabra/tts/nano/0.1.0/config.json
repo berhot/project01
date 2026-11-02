@@ -1,0 +1,20 @@
+{
+  "features": {
+    "sample_rate": 16000,
+    "n_fft": 400,
+    "hop_length": 160,
+    "n_mels": 80,
+    "log_scale": 8.0
+  },
+  "acoustic": {
+    "vocab_size": 353,
+    "n_mels": 80,
+    "hidden_size": 64,
+    "reduction": 4,
+    "num_speakers": 1
+  },
+  "vocoder": {
+    "n_mels": 80,
+    "channels": 32
+  }
+}
