@@ -50,8 +50,9 @@ def require_guidance_training(model, guidance_scale):
 
 
 def train(args):
-    if args.steps<1 or args.batch_size<1 or args.learning_rate<=0 or args.cpu_threads<1 or args.log_every<1
-            or not 0 <= args.cfg_drop_prob < 1:
+    if (args.steps < 1 or args.batch_size < 1 or args.learning_rate <= 0
+            or args.cpu_threads < 1 or args.log_every < 1
+            or not 0 <= args.cfg_drop_prob < 1):
         raise ValueError("Invalid training arguments")
     if args.device=="cpu": torch.set_num_threads(args.cpu_threads)
     torch.manual_seed(args.seed)
