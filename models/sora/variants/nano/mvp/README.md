@@ -328,3 +328,70 @@ and can skip steps. It produced multicolored noise in the first pilot. The
 pipeline exposes both honestly; no choice of sampler replaces better training
 or stronger language conditioning. Old checkpoints from other Sora
 architectures are rejected.
+
+## Classifier-free guidance (CFG) experiment — bilingual RGB pixels
+
+The old 3000-step RGB checkpoint generated largely **the same red rounded
+object** regardless of color, shape, or language. The trained noise predictor
+works, but conditioning quality **failed**. The next experiment adds:
+
+- **Training text dropout** (`--cfg-drop-prob 0.15`): fully masks prompts for
+  roughly 15% of examples, so the network learns unconditional predictions.
+- **Guidance-scale inference** (`--guidance-scale`): combines conditional and
+  unconditional noise predictions at every RGB denoising step. Scale `1.0`
+  is the original conditional prediction; `3.0`, `5.0`, `7.5` test stronger
+  conditioning, which can also degrade or oversaturate results.
+- **Model width selection**: `--base-channels 32` (also accepts the legacy
+  `--channels`). Earlier checkpoints are not overwritten. A new training
+  run is necessary for guidance > 1; the inference CLI explicitly rejects
+  older pixel checkpoints that lack null-conditioning training.
+- **Toy metrics**: foreground color, approximate circle/square fill-ratio,
+  strict prompt match and English/Arabic pair agreement. Ambiguous/undetected
+  shapes count as incorrect. These are **heuristics for only this toy
+  dataset**. Good scores do not prove realistic image quality.
+- **Guidance comparison**: creates 12 real pixel-diffusion images for each
+  scale and seed, together with per-image scores, contact sheets, and a
+  JSON summary. No synthetic shape renderer is called in inference.
+
+### Train in your ORIGINAL BERHOT directory, no extra worktree
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+python3 -m scripts.pixel_diffusion train \
+  --steps 10000 --batch-size 12 --device cpu --cpu-threads 2 \
+  --cfg-drop-prob 0.15 --base-channels 32
+```
+
+Training 10,000 steps can be expensive on a CPU. Test with 200–500 steps first
+to verify the new training path, then train a **new run**. Record the actual
+printed `pixel-.../checkpoint.pt` path. The previous 3000-step checkpoint
+is preserved but **cannot provide meaningful classifier-free guidance**.
+
+```bash
+CKPT=$(find storage/artifacts/sora/nano/mvp \
+  -path '*/pixel-*/checkpoint.pt' -type f | sort | tail -1)
+test -f "$CKPT"
+OUT="/tmp/sora-cfg-$(date +%s)"
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$CKPT" --sampler posterior_mean \
+  --guidance-scales 1 3 5 7.5 --seeds 42 123 \
+  --output-dir "$OUT"
+open "$OUT/guidance_3_seed_42/preview_grid.png"
+cat "$OUT/summary.json"
+```
+
+For a single Arabic/English experiment, use `python3 -m
+scripts.pixel_diffusion evaluate --checkpoint "$CKPT" --guidance-scale 3
+--sampler posterior_mean --output-dir /tmp/unique-output`. The evaluation's
+`report.json` now contains `metrics` and each image's heuristic prediction.
+
+**Success gate**: visually recognizable shapes, correct red/green/blue colors
+and circle/square classification for both languages across several seeds;
+prompt accuracy and bilingual **both-correct** rate should corroborate visual
+inspection. Do not merge as a visually validated model just because noise
+loss decreases or a smoke CI passes.
