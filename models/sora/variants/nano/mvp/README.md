@@ -282,12 +282,12 @@ test -f "$CKPT"
 
 python3 -m scripts.pixel_diffusion sample \
   --checkpoint "$CKPT" --prompt 'دائرة حمراء' \
-  --seed 42 --sample-steps 50 \
+  --seed 42 --sampler posterior_mean \
   --output /tmp/sora-pixel-arabic.png
 
 OUT="/tmp/sora-pixel-eval-$(date +%s)"
 python3 -m scripts.pixel_diffusion evaluate \
-  --checkpoint "$CKPT" --seed 42 --sample-steps 50 \
+  --checkpoint "$CKPT" --seed 42 --sampler posterior_mean \
   --output-dir "$OUT"
 open "$OUT/preview_grid.png"
 ```
@@ -299,8 +299,11 @@ quality. Saving into an existing output location is intentionally rejected.
 ### Known limitations and results
 
 The first independent 850-step CPU training run of an early 16-channel
-pixel-U-Net reached noise MSE ~0.07, but **images were still visibly noisy and
-not recognizable**. This is a real failure of image fidelity despite correct
+pixel-U-Net reached noise MSE ~0.07. **DDIM samples were still visibly noisy**.
+Using full-step deterministic DDPM posterior means instead produced colored,
+rounded objects, but **red remained greenish, and circles and squares were
+still poorly distinguished**. These are actual experimental outputs, not
+proof of prompt fidelity. This is a real failure of image fidelity despite correct
 end-to-end software operation. It is not appropriate to merge or ship this
 as a visually successful diffusion model. The new GitHub CI uses only a
 short **smoke training run** and tests checkpoint → inference → PNG export.
@@ -311,3 +314,17 @@ quantitative quality measures, and visual review remain required.
 Do not confuse this image-level diffusion with `layout-ddpm-v1`, which
 diffuses only three geometry parameters, or with the shape CVAE and neural
 renderer. All baselines are preserved separately.
+
+### Sampling methods (important)
+
+`--sampler posterior_mean` (default) uses **all diffusion timesteps** and
+iterates the DDPM reverse posterior mean without injecting additional noise.
+It is a deterministic reconstruction heuristic and **not an unbiased DDPM
+sample**. It produced more coherent 32×32 objects on the pilot checkpoint,
+but the text-conditioning quality was inadequate.
+
+`--sampler ddim --sample-steps 50` uses a standard deterministic DDIM update
+and can skip steps. It produced multicolored noise in the first pilot. The
+pipeline exposes both honestly; no choice of sampler replaces better training
+or stronger language conditioning. Old checkpoints from other Sora
+architectures are rejected.
