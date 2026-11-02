@@ -1,15 +1,7 @@
 name: Sora Nano visual baseline
 
+# Manual-only during active development to avoid repeated failing-run emails.
 on:
-  push:
-    branches: [feat/image-nano-foundation-mvp-20261102]
-    paths:
-      - 'models/sora/**'
-      - '.github/workflows/sora-nano-visual.yml'
-  pull_request:
-    paths:
-      - 'models/sora/**'
-      - '.github/workflows/sora-nano-visual.yml'
   workflow_dispatch:
 
 jobs:
