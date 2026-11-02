@@ -12,6 +12,7 @@ import torch
 from ..paths import BERHOT_ROOT, TRAIN_ROOT, VAL_ROOT, validate_run_id
 from ..runtime import select_device, fingerprint, atomic_json, environment
 from .tokenizer import TextTokenizer
+from .multisentence import sample_index
 from .dataset import MelConfig, TTSDataset, collate_tts, inspect_sources, speaker_key
 from .acoustic_model import AcousticConfig, AcousticModel, acoustic_loss
 from .vocoder import VocoderConfig, Vocoder, reconstruction_loss
@@ -71,6 +72,8 @@ def train(train_source=None,val_source=None,steps=100,learning_rate=0.001,seed=4
         checkpoint=torch.load(resume,map_location='cpu',weights_only=True)
         if checkpoint.get('schema_version')!=1 or checkpoint.get('task')!='tts':raise ValueError('Invalid TTS checkpoint')
         if checkpoint['dataset_fingerprints']!=fingerprints:raise ValueError('TTS dataset mismatch')
+        if checkpoint.get('sampling_strategy')!='epoch-shuffle-v1' or checkpoint.get('seed')!=seed:
+            raise ValueError('TTS resume sampling strategy or seed mismatch; start a fresh run for older checkpoints')
         restored_config = dict(checkpoint['config'])
         if 'vocoder' in restored_config:
             restored_config['vocoder'] = asdict(VocoderConfig(**restored_config['vocoder']))
@@ -89,12 +92,12 @@ def train(train_source=None,val_source=None,steps=100,learning_rate=0.001,seed=4
     atomic_json(run/'logs/run.json',{'schema_version':1,'task':'tts','run_id':run_id,'config':config_data,
                 'seed':seed,'learning_rate':optimizer.param_groups[0]['lr'],'requested_learning_rate':learning_rate,'resume':str(resume) if resume else None,'device':str(device),'environment':environment(),
                 'dataset_fingerprints':fingerprints,'source_manifest':records,'speakers':speakers,
-                'quality_status':'experimental-engineering-only','start_step':start,'target_steps':steps})
+                'quality_status':'experimental-engineering-only','start_step':start,'target_steps':steps,'sampling_strategy':'epoch-shuffle-v1'})
     started=time.monotonic()
     with CheckpointStop() as stop_control:
       for step in range(start+1,steps+1):
           acoustic.train();vocoder.train();optimizer.zero_grad(set_to_none=True)
-          item=data[(step-1)%len(data)]
+          item=data[sample_index(step,len(data),seed)]
           batch=collate_tts([item])
           a_loss,a_metrics=acoustic_loss(acoustic,batch)
           # Training crops are Mel-conditioned waveform examples, never inference playback.
@@ -117,7 +120,8 @@ def train(train_source=None,val_source=None,steps=100,learning_rate=0.001,seed=4
                   'epoch':(step-1)//len(data)+1,'acoustic':acoustic.state_dict(),'vocoder':vocoder.state_dict(),
                   'optimizer':optimizer.state_dict(),'config':config_data,'tokenizer':tokenizer.to_dict(),'speakers':speakers,
                   'dataset_fingerprints':fingerprints,'source_manifest':records,'torch_rng_state':torch.get_rng_state(),
-                  'python_rng_state':random.getstate(),'seed':seed,'environment':environment()}
+                  'python_rng_state':random.getstate(),'seed':seed,'environment':environment(),
+                  'sampling_strategy':'epoch-shuffle-v1'}
               path=run/'checkpoints'/f'step_{step:06d}.pt';temp=path.with_suffix('.tmp')
               try:torch.save(checkpoint,temp);temp.replace(path)
               finally:temp.unlink(missing_ok=True)
