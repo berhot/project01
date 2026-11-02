@@ -50,7 +50,7 @@ class MultiSentenceTests(unittest.TestCase):
             for name, rows in (("train", train), ("val", val)):
                 with (root / f"{name}.jsonl").open("w", encoding="utf-8") as handle:
                     for record in rows:
-                        handle.write(json.dumps(record, ensure_ascii=False) + "\\n")
+                        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
             report = readiness(root / "train.jsonl", root / "val.jsonl",
                                min_train=2, min_distinct=2)
             self.assertEqual(report["readiness"], "ready-for-experimental-training")
@@ -60,7 +60,7 @@ class MultiSentenceTests(unittest.TestCase):
             # Unseen validation speaker is incompatible with a learned embedding.
             val[0]["speaker_id"] = "other-speaker"
             (root / "val.jsonl").write_text(
-                json.dumps(val[0], ensure_ascii=False) + "\\n", encoding="utf-8"
+                json.dumps(val[0], ensure_ascii=False) + "\n", encoding="utf-8"
             )
             with self.assertRaisesRegex(ValueError, "speakers absent"):
                 readiness(root / "train.jsonl", root / "val.jsonl", min_train=2, min_distinct=2)
