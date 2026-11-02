@@ -21,6 +21,24 @@ class CorpusPreparationTests(unittest.TestCase):
         self.assertRaises(ValueError,check_leakage,a,[{"transcript":"ثلاثة","audio_sha256":"1"}])
     def test_single_prompt_split_rejected(self):
         self.assertRaises(ValueError,split_groups,[{"transcript":"نفسه"}]*3)
+    def test_duplicate_original_audio_is_rejected_before_creation(self):
+        from src.corpus_preparation import prepare
+        import json
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            original=root/"original.wav"
+            original.write_bytes(b"fake source is never converted")
+            index=root/"index.jsonl"
+            lines=[
+                {"audio":"original.wav","transcript":"مرحبا"},
+                {"audio":"original.wav","transcript":"صباح الخير"},
+            ]
+            index.write_text("".join(json.dumps(row,ensure_ascii=False)+"\\n" for row in lines),encoding="utf8")
+            destination=root/"prepared"
+            with self.assertRaisesRegex(ValueError,"Duplicate original"):
+                prepare(index,destination)
+            self.assertFalse(destination.exists())
+
     def test_preflight_with_valid_wavs(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)
