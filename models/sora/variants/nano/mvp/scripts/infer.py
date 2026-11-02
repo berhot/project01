@@ -17,6 +17,8 @@ def main():
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
     if checkpoint.get("schema_version") != 1 or checkpoint.get("task") != "caption-conditioned-ddpm-demo" or checkpoint.get("captions") != list(CAPTIONS):
         raise ValueError("Unsupported image checkpoint")
+    if checkpoint["config"].get("schedule_version") != "cosine_v1":
+        raise ValueError("Legacy checkpoint uses an incompatible diffusion schedule. Retrain with updated code.")
     model = Denoiser(Config(**checkpoint["config"])).to(args.device)
     model.load_state_dict(checkpoint["model"], strict=True)
     save_png(sample(model, caption_id(args.prompt), seed=args.seed, device=args.device), args.output)
