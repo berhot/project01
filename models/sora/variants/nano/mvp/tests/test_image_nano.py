@@ -4,7 +4,7 @@ from pathlib import Path
 
 import torch
 
-from src.model import CAPTIONS, Config, Denoiser, caption_id, synthetic_image, training_loss, sample, save_png
+from src.model import CAPTIONS, Config, Denoiser, caption_id, synthetic_image, training_loss, sample, save_png, schedule
 
 
 class ImageNanoTests(unittest.TestCase):
@@ -30,6 +30,11 @@ class ImageNanoTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(loss))
         loss.backward()
         self.assertTrue(any(p.grad is not None and p.grad.abs().sum() > 0 for p in model.parameters()))
+
+    def test_schedule_reaches_noise(self):
+        _, _, cumulative = schedule(Config(diffusion_steps=50), "cpu")
+        self.assertLess(float(cumulative[-1]), 0.001)
+        self.assertGreater(float(cumulative[0]), 0.9)
 
     def test_checkpoint_roundtrip_and_infer(self):
         torch.manual_seed(1)
