@@ -78,11 +78,13 @@ def evaluate_unseen(checkpoint, prompts_file, output_dir, speaker=None, max_fram
             metrics = signal_metrics(waveform)
             write_wav(output_dir / name, waveform.cpu(), info["sample_rate"])
             row.update({"status": "generated", "duration_seconds": info["duration_seconds"],
+                        "stop_predicted": info.get("stop_predicted"),
+                        "frame_limit_reached": info.get("frame_limit_reached"),
                         "sha256": sha256_file(output_dir / name), **metrics})
         except (ValueError, RuntimeError, FloatingPointError) as exc:
             row.update({"status": "error", "error": f"{type(exc).__name__}: {exc}"})
         rows.append(row)
-    n_fail = sum(r["status"] != "generated" or r.get("silent") or r.get("clipped") for r in rows)
+    n_fail = sum(r["status"] != "generated" or r.get("silent") or r.get("clipped")\n                 or r.get("frame_limit_reached") for r in rows)
     report = {
         "schema_version": 1, "task": "nabra-unseen-tts-diagnostic",
         "checkpoint_sha256": sha256_file(checkpoint),
@@ -91,7 +93,7 @@ def evaluate_unseen(checkpoint, prompts_file, output_dir, speaker=None, max_fram
         "holdout_overlap_checked": bool(train_sources),
         "speaker": speaker or bundle[4][0],
         "records": rows, "prompt_count": len(texts),
-        "signal_warning_count": n_fail,
+        "signal_warning_count": n_fail,\n        "frame_limit_hit_count": sum(bool(r.get("frame_limit_reached")) for r in rows),
         "signal_checks_pass": n_fail == 0,
         "human_intelligibility": "not evaluated",
         "generalization": "not established",
