@@ -149,3 +149,52 @@ New diagnostic fields `shape_accuracy_by_expected_shape`,
 failure from broad shape collapse. **Stop before another long run**
 and determine which geometry is failing. The tool only reads
 already-generated PNGs/reports, not model weights.
+
+## Triangle curriculum trial: 800 additional v2 steps (2026-11-03)
+
+User loaded the 2,500-step v2 warm-start model, reset the optimizer,
+and trained an **independent new run for 800 steps** at LR 0.00005 with
+50% triangle examples. Original and new checkpoints remain distinct.
+
+- Source: `pixel-20261103T004620Z-c92b5c0b/checkpoint.pt`
+- New checkpoint: `pixel-20261103T063642Z-168cc81f/checkpoint.pt`
+- Last training noise MSE: 0.016052
+- At CFG **5.0**, both seed 42 and 123:
+  - Color accuracy: 95.83%
+  - Shape accuracy: 66.67%
+  - Strict prompt accuracy: 62.50% (15/24)
+  - Bilingual both correct: 58.33%
+  - Diagnostic per-shape: **circles 100%, squares 100%, triangles 0%**
+- At CFG 7.5:
+  - Color 95.83%; shape 58.33% (seed 42) / 62.50% (seed 123)
+  - Prompt accuracy 54.17% / 58.33%
+  - **Triangles 0%** at both seeds
+- The actual 24-image CFG 7.5 preview was shared for visual review.
+  It clearly shows **no recognizable triangles**; nearly every
+  triangle prompt becomes a square/rectangular colored object.
+
+**Conclusion: triangle oversampling alone did not solve geometry control.**
+CFG 5 gave better overall 12-class score than 7.5. Both model training
+and inference execute normally, but the new triangle semantics
+have not been learned. This is not a metric-only misclassification.
+
+## Next bounded architecture experiment (unvalidated)
+
+The new `rgb-unet-spatial-text-v2` architecture is a **separate,
+opt-in** model: trainable per-pixel attention over individual Arabic/
+English words at 32×32 and 16×16, instead of only averaging all
+words into one global vector. Its attention output begins as a zero
+residual so existing trained RGB weights can be transferred exactly.
+Additionally, it offers an RGB silhouette Dice training loss computed
+from existing **training-image pixels** at lower-noise timesteps.
+No shape renderer is used at inference.
+
+The existing `rgb-unet-text-v1` model and all checkpoints are
+unchanged. The new experiment must prove that it can generate
+triangles without forgetting circles, squares, or colors. The first
+test is 2 training steps (unit test) and 100 CLI steps, **not**
+another 10,000 steps. The next quality comparison would use a
+same-dataset 800-step experiment (LR 0.00005) from the original 2,500-step
+warm-start checkpoint. Only undertake it if all automated tests pass.
+
+This is a research hypothesis, not a fix already shown to work.
