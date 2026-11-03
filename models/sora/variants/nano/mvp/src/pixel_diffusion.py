@@ -294,18 +294,19 @@ def shape_aware_training_objective(model,images,tokens,cfg_drop_prob=0.15,
 def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mean",guidance_scale=1.0):
     """Generate pixels from learned diffusion.
 
-    'posterior_mean': full-step DDPM posterior mean without added variance
-    (deterministic, often sharper on the toy task, not an unbiased DDPM sample).
+    'posterior_mean': full-step reverse posterior mean without noise.
+    'ancestral': full-step stochastic DDPM posterior sampling, with learned
+    RGB-noise prediction, standard posterior variance and x0 clipping.
     'ddim': deterministic DDIM with optional timestep skipping.
     """
     if not math.isfinite(guidance_scale) or not 0 <= guidance_scale <= 20:
         raise ValueError("guidance_scale must be between 0 and 20")
     total=model.config.diffusion_steps
-    if sampler not in ("posterior_mean","ddim"):
+    if sampler not in ("posterior_mean","ancestral","ddim"):
         raise ValueError("Unsupported diffusion sampler")
-    if sampler=="posterior_mean":
+    if sampler in ("posterior_mean","ancestral"):
         if steps not in (None,total):
-            raise ValueError("posterior_mean requires all diffusion timesteps")
+            raise ValueError(f"{sampler} requires all diffusion timesteps")
         steps=total
     else:
         steps=total if steps is None else steps
@@ -315,8 +316,8 @@ def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mea
     x=torch.randn((1,3,32,32),device=device,generator=generator)
     beta,alpha,cum=noise_schedule(model.config,device)
     model.eval()
-    if sampler=="posterior_mean":
-        for t in range(total-1,-1,-1):
+    if sampler in ("posterior_mean","ancestral"):
+        for t in range(total-1,-1):
             eps=guided_noise(model,x,torch.tensor([t],device=device,dtype=torch.long),tokens,guidance_scale)
             a=cum[t]
             x0=((x-(1-a).sqrt()*eps)/a.sqrt()).clamp(-1,1)
@@ -326,6 +327,12 @@ def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mea
                 mean_x0=beta[t]*prev.sqrt()/(1-a)
                 mean_xt=alpha[t].sqrt()*(1-prev)/(1-a)
                 x=mean_x0*x0+mean_xt*x
+                if sampler=="ancestral":
+                    # True reverse-process variance (not deterministic mean).
+                    posterior_variance=(beta[t]*(1-prev)/(1-a)).clamp(min=0)
+                    x=x+posterior_variance.sqrt()*torch.randn(
+                        x.shape,device=device,dtype=x.dtype,generator=generator
+                    )
     else:
         timesteps=torch.linspace(total-1,0,steps).round().long().unique_consecutive()
         for i,t in enumerate(timesteps.tolist()):
