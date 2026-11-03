@@ -192,3 +192,39 @@ geometry remains 0/8, do not assume longer training fixes it.
 - No training or GitHub Actions is automatically triggered.
 - PR #10 stays draft, old checkpoints remain intact, no
   `storage/releases/sora/` writes or R2 uploads are done.
+
+
+## Test fix — Arabic shape-only counterfactual (2026-11-04)
+
+The first Mac run of the new V2.1 code discovered **140 tests,
+one failure**: `test_correct_vs_wrong_shape_word_supervision_and_gradient`.
+The counterfactual ranking loss rotated **entire caption token
+sequences** between circle, square, and triangle. In Arabic, this
+also rotated gender-dependent color adjectives: for example,
+`دائرة صفراء` (yellow circle) versus `مثلث أصفر` (yellow triangle).
+Therefore the supposed "shape-only" test also changed the COLOR
+TOKEN in Arabic. This was a valid test failure and a research
+confound, not proof of better/worse model generation.
+
+The loss now replaces **only the shape token ID** with the
+alternative target-shape word of the same language. All other
+tokens, including Arabic gendered adjective, remain unchanged.
+The regression test now asserts exactly one changed token per
+prompt and identity for the whole non-shape token sequence.
+
+The corrected code is committed but has **not yet passed Mac
+testing**. Rerun:
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git fetch origin feat/image-nano-foundation-mvp-20261102
+git merge --ff-only FETCH_HEAD
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -p 'test_shape_field_v21.py' -v
+python3 -m unittest discover -s tests -v
+```
+
+Only after all **140 tests pass**, proceed with the read-only
+shape-word audit. The V2.1 training pilot remains experimental
+and has **not** been launched.
