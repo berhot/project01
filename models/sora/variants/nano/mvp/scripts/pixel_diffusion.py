@@ -274,7 +274,7 @@ def train(args):
     return path
 
 
-def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mean",guidance_scale=1.0):
+def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mean",guidance_scale=1.0,shared_noise=False):
     require_guidance_training(model, guidance_scale)
     version = model.config.dataset_version
     prompts = PROMPTS if version=="v1" else [
@@ -292,7 +292,8 @@ def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mea
     device=next(model.parameters()).device
     for j,(english,arabic) in enumerate(prompts):
         for lang_index,prompt in enumerate((english,arabic)):
-            image=generate(model,prompt,seed=seed+j,device=device,steps=sample_steps,sampler=sampler,guidance_scale=guidance_scale)
+            sample_seed=seed if shared_noise else seed+j
+            image=generate(model,prompt,seed=sample_seed,device=device,steps=sample_steps,sampler=sampler,guidance_scale=guidance_scale)
             name=english.replace(" ","_")+("_en.png" if lang_index==0 else "_ar.png")
             save_image(image,path/name)
             thumbnail=Image.open(path/name).resize((32*scale,32*scale),Image.Resampling.NEAREST)
@@ -309,9 +310,9 @@ def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mea
                 "predicted_color":finding["color"],"predicted_shape":finding["shape"],
                 "foreground_pixels":finding["foreground_pixels"],
                 "fill_ratio":finding["fill_ratio"],
-                "language":language,"seed":seed+j,
+                "language":language,"seed":sample_seed,
             })
-            entries.append({"prompt":prompt,"image":name,"seed":seed+j,
+            entries.append({"prompt":prompt,"image":name,"seed":sample_seed,
                             "language":language,"heuristic":finding})
     grid.save(path/"preview_grid.png")
     metrics = summarize(predictions,dataset_version=version)
@@ -321,6 +322,7 @@ def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mea
         "training_data":"synthetic; no photorealistic or open-domain data",
         "image_pixels_generated_by_diffusion":True,
         "sampler":sampler,"sample_steps":sample_steps,
+        "shared_noise_across_concepts":bool(shared_noise),
         "guidance_scale":guidance_scale,
         "checkpoint_cfg_drop_prob":getattr(model, "cfg_drop_prob", 0.0),
         "metrics":metrics,
@@ -363,6 +365,7 @@ def main():
     e.add_argument("--sample-steps",type=int,default=None)
     e.add_argument("--sampler",choices=("posterior_mean","ancestral","ddim"),default="posterior_mean")
     e.add_argument("--guidance-scale",type=float,default=1.0)
+    e.add_argument("--shared-noise",action="store_true",help="Use identical initial noise for every concept and language")
     e.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     s=sub.add_parser("sample")
     s.add_argument("--checkpoint",required=True)
@@ -376,7 +379,7 @@ def main():
     args=p.parse_args()
     if args.action=="train": train(args)
     elif args.action=="evaluate":
-        evaluate(load_model(args.checkpoint,args.device),args.output_dir,args.seed,args.sample_steps,sampler=args.sampler,guidance_scale=args.guidance_scale)
+        evaluate(load_model(args.checkpoint,args.device),args.output_dir,args.seed,args.sample_steps,sampler=args.sampler,guidance_scale=args.guidance_scale,shared_noise=args.shared_noise)
     else:
         model=load_model(args.checkpoint,args.device)
         require_guidance_training(model, args.guidance_scale)
