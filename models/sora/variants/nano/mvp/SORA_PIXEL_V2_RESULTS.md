@@ -309,3 +309,62 @@ The corrected new tests are **awaiting a Mac run**, and this
 does NOT establish ancestral sampling will generate triangles.
 The old checkpoints remain untouched; GitHub workflow remains
 manual-only.
+
+## Matched-noise sampler experiment: no triangle recovery (2026-11-03)
+
+The user evaluated the **same trained 800-step spatial-text checkpoint**
+(`pixel-20261103T065647Z-ee054d71/checkpoint.pt`) with identical
+initial noise for every shape/color prompt, at CFG 5.0 and seed 42.
+
+| Metric | Posterior mean | Ancestral DDPM |
+|---|---:|---:|
+| Color accuracy | 100% | 100% |
+| Shape accuracy | 66.67% | 41.67% |
+| Strict prompt accuracy | 66.67% | 41.67% |
+| Bilingual both correct | 66.67% | 41.67% |
+| Triangle accuracy | 0% | 0% |
+
+Ancestral report: `/tmp/sora-ancestral-shared-1793709484`; posterior
+mean report: `/tmp/sora-mean-shared-1793709484`.
+Square-vs-triangle same-noise foreground-mask IoU was **0.8172**
+(ancestral). The screenshot shows distorted but still non-triangular
+blobs in the triangle rows, while some squares also degraded.
+
+**Decision:** ancestral noise does not solve geometry control in
+this checkpoint. Retain the prior deterministic posterior-mean
+baseline, with its limitations clearly labeled.
+
+## Next test: matched-layout square/triangle counterfactuals (unvalidated)
+
+A new opt-in **training objective** creates paired procedural
+TRAINING samples with the **same color, position, size and
+background** but different square/triangle silhouettes and different
+Arabic/English shape words. Both conditioned versions receive
+the **same noisy RGB tensor** at a moderate diffusion timestep.
+Their mathematically valid denoising targets differ, making a
+shape-blind noise predictor wrong on at least one member of the
+pair. An added differentiable silhouette-difference term focuses
+on the missing triangular corner regions. Ordinary RGB noise
+training/CFG remain in the objective, and the inference sampler
+is unmodified. No renderer is used at image inference.
+
+Opt in via `--paired-shape-weight 0.35 --paired-shape-pairs 4
+--paired-silhouette-weight 0.5` with `--conditioning spatial
+--dataset-version v2`. The default weight is **0**, so previous
+training remains unchanged. Checkpoint metadata records these
+choices and preserves the original spatial source checkpoint.
+
+The related **read-only** `scripts.pixel_shape_probe` measures
+how the pretrained denoiser's noise predictions respond to
+switching square to triangle while holding noisy pixels,
+background, color, and target geometry aligned. The probe
+reports expected/predicted noise-difference RMS, their ratio
+and cosine alignment. These are synthetic-diagnostic metrics,
+not actual generated-image shape accuracy.
+
+**No full training was run and no improvement is claimed.**
+The new tests and probe must first be executed on the user's Mac.
+If they pass, attempt a 50-step integration smoke, followed by
+a bounded 300-step trial only if the user approves further compute.
+A triangle generated at the correct color in both languages,
+across multiple seeds, remains the acceptance gate.
