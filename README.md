@@ -96,8 +96,8 @@ Sora's earlier checkpoints were saved under its nested MVP
 
 ```bash
 cd models/sora/variants/nano/mvp
-python3 -m scripts.migrate_storage              # dry-run
-python3 -m scripts.migrate_storage --apply      # copy + SHA-256 verify
+python3 -m scripts.migrate_storage --run-id pixel-20261103T065647Z-ee054d71
+python3 -m scripts.migrate_storage --apply --run-id pixel-20261103T065647Z-ee054d71
 ```
 
 No Sora release has been approved or published; only experimental artifacts
