@@ -38,7 +38,7 @@ def _listing(root):
     return paths
 
 
-def migrate(source=None, destination=None, apply=False):
+def migrate(source=None, destination=None, apply=False, run_ids=None):
     src=Path(source) if source is not None else legacy_artifacts()
     dst=Path(destination) if destination is not None else sora_artifacts()
     src,dst=src.expanduser().resolve(),dst.expanduser().resolve()
@@ -49,8 +49,16 @@ def migrate(source=None, destination=None, apply=False):
                 "runs":[],"status":"legacy source not present"}
     if not src.is_dir() or src.is_symlink():
         raise ValueError("Legacy source must be an ordinary directory")
+    if run_ids is not None:
+        run_ids=set(run_ids)
+        if not run_ids or any((not name or "/" in name or "\\\\" in name
+                               or name in (".","..") or name.startswith("."))
+                              for name in run_ids):
+            raise ValueError("run_ids must be safe, nonempty run directory names")
     runs=[]
     for run in sorted(src.iterdir()):
+        if run_ids is not None and run.name not in run_ids:
+            continue
         if run.is_symlink():
             raise ValueError(f"Symlink run is not permitted: {run}")
         if not run.is_dir():
@@ -88,8 +96,10 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply",action="store_true",
                         help="Copy and verify; omit for dry-run")
+    parser.add_argument("--run-id",action="append",default=None,
+                        help="Copy only this run ID (repeatable); omit for all")
     args=parser.parse_args()
-    print(json.dumps(migrate(apply=args.apply),indent=2,ensure_ascii=False))
+    print(json.dumps(migrate(apply=args.apply,run_ids=args.run_id),indent=2,ensure_ascii=False))
 
 
 if __name__=="__main__":
