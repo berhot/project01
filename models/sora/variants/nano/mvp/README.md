@@ -1457,3 +1457,36 @@ release rules. Current Nabra and JSM storage is deliberately unchanged.
 best older run, followed by the same command with `--apply` after review.
 `--run-id` can be repeated for additional runs. Original files are never
 deleted, and existing destination files are never overwritten.
+
+## Shape Learning V3 — high-noise geometry research (NOT yet validated)
+
+The real samples showed that **blue circles can be angular** and a
+**yellow triangle can be generated as a square**. The earlier simple
+fill-ratio classifier overestimated circle quality; there is no
+approved Sora release.
+
+The opt-in `--shape-v3` training recipe addresses only the
+**high-noise bilingual shape-word weakness** identified by audits:
+it uses valid q(x_t|x0), never the previously failed midpoint
+counterfactual objective; samples timesteps in t/T=0.55..0.85;
+keeps all 12 color-shape concepts balanced per 12-image training
+batch; and **requires** a frozen baseline teacher to protect circles
+and squares. It writes distinct new central-storage checkpoints.
+The underlying trained architecture is still spatial-text-v2.
+
+A strict `python3 -m scripts.pixel_shape_quality` tool now
+measures the **actual learned generated PNGs** against ideal
+silhouette references and rejects cropped/blurry/shape-confused
+results more conservatively. Evaluation templates are NEVER
+used to generate inference outputs.
+
+**First action** (before training):
+```bash
+python3 -m unittest discover -s tests -v
+```
+The V3 changes add 10 tests to the previous 101; they have not yet
+been run on the user's Mac. **Then** follow
+[SHAPE_LEARNING_V3.md](SHAPE_LEARNING_V3.md) for the 20-step pilot
+and the identical-seed baseline/candidate quality comparison.
+No long training, baseline replacement, release packaging,
+or background CI is authorized.
