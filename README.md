@@ -78,3 +78,28 @@ python -m models.jsm.variants.nano.mvp.scripts.inference --prompt "السعود�
 
 See the [MVP guide](models/jsm/variants/nano/mvp/README.md) for training,
 resuming, and shorter commands from inside the MVP directory.
+
+
+## Canonical shared model output storage
+
+All **new** model outputs belong under the single repo-root
+`storage/artifacts/<family>/<variant>/<stage>/<run-id>/` tree;
+validated versions may be published, after review, to
+`storage/releases/<family>/<variant>/<version>/`. The shared helper
+`berhot_storage.paths` anchors both locations to the repository
+regardless of the current working directory. Sora Nano's five trainers,
+samples and reports now default to this central layout. Existing JSM/Nabra
+MVP paths remain unchanged; see [migration and company-wide rules](docs/storage.md).
+
+Sora's earlier checkpoints were saved under its nested MVP
+`storage/artifacts/sora/nano/mvp/`. To migrate them without deletion:
+
+```bash
+cd models/sora/variants/nano/mvp
+python3 -m scripts.migrate_storage              # dry-run
+python3 -m scripts.migrate_storage --apply      # copy + SHA-256 verify
+```
+
+No Sora release has been approved or published; only experimental artifacts
+are present on the training machine. Central releases are not produced just
+because training finished.
