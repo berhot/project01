@@ -51,9 +51,17 @@ class ShapeFieldV21Tests(unittest.TestCase):
             self.assertTrue(torch.equal(truth[start+4],truth[start+5]))
             self.assertFalse(torch.equal(truth[start],truth[start+2]))
             self.assertFalse(torch.equal(truth[start+2],truth[start+4]))
-            self.assertTrue(torch.equal(
-                keyword_ids(tokens[start:start+6],COLOR_WORDS)[::2],
-                keyword_ids(tokens[start:start+6],COLOR_WORDS)[1::2]
+            self.assertEqual(
+                {color for color,shape,language in labels[start:start+6]},
+                {labels[start][0]}
+            )
+            self.assertEqual(
+                {language for color,shape,language in labels[start:start+6]},
+                {"en","ar"}
+            )
+            self.assertTrue(torch.all(
+                keyword_ids(tokens[start:start+6],SHAPE_WORDS)[::2] !=
+                keyword_ids(tokens[start:start+6],SHAPE_WORDS)[1::2]
             ))
         with self.assertRaises(ValueError):
             matched_layout_shape_batch(0,1)
