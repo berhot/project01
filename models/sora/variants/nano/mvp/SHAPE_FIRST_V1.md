@@ -214,3 +214,93 @@ The previous RGB DDPM checkpoints and V3 logs remain unchanged.
 All output stays within central `BERHOT/storage/artifacts/sora/nano/mvp/`.
 No automated training, GitHub Actions, R2 sync, PR merge, or publication
 into `storage/releases/` is performed.
+
+## 2026-11-03 pilot verdict: FAIL, diagnose stages before training
+
+The user's Mac completed **121/121 original + shape-first tests** and a
+40-step mask + 30-step appearance smoke run from scratch, saved as:
+
+`storage/artifacts/sora/nano/mvp/shape-first-20261103T204620Z-c284ab89/`
+
+The user then evaluated all 24 bilingual prompts successfully:
+
+`storage/artifacts/sora/nano/mvp/shape-first-eval-20261103T204832Z-884e9bc7/`
+
+Outputs include `preview_grid.png` and
+`learned_masks_preview_grid.png`.
+
+**Actual generation was poor**: strict circle, square, and triangle
+geometry all **0/8**; strict prompt accuracy **0/24**; legacy
+shape/prompt accuracy **0/24**; color accuracy **6/24**.
+`scripts.shape_first_review` correctly rejected this architecture:
+`research_gate_pass=false`, every acceptance check false, compared
+against original RGB baseline strict prompt rate **0.4583**.
+The mask loss fell from ~1.777 to ~1.198 and weighted RGB appearance
+loss from ~1.393 to ~0.645, but falling training loss does not prove
+that generation from the prior is good.
+
+This does **not** establish whether the principal failure is:
+- reconstruction learning at the mask VAE decoder (posterior);
+- mismatch between sampled Gaussian prior and the encoded mask
+  posterior or failure to respect text shape words;
+- insufficient RGB appearance training with *perfect* masks; or
+- distribution shift when the appearance model sees generated masks
+  rather than training-time true masks.
+
+Do **not** run a long 500/350-step training recipe until these separate
+questions are measured. Do **not** promote this checkpoint or change
+any of the original RGB DDPM weights.
+
+### Stage-by-stage diagnosis (read-only, no retraining)
+
+After syncing the latest draft branch and passing the **125 tests**
+(121 before this change + four additional diagnosis tests), run:
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git fetch origin feat/image-nano-foundation-mvp-20261102
+git merge --ff-only FETCH_HEAD
+
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+RUN="/Users/farisalsaiari/Desktop/BERHOT/storage/artifacts/sora/nano/mvp/shape-first-20261103T204620Z-c284ab89"
+
+python3 -m scripts.shape_first_diagnose \
+  --run-dir "$RUN" --seed 42 --device cpu
+```
+
+The new `scripts/shape_first_diagnose.py` tool reads both existing
+checkpoint files, validates their SHA-256 hashes, and uses held-out
+validation images **only for diagnosing training behavior**.
+It reports for each of circle/square/triangle and each color/language:
+
+- **Posterior held-out mask IoU**: how well the mask decoder
+  reconstructs an unseen mask supplied to the *encoder*.
+- **Random-prior mask strict geometry and foreground size**:
+  what the trained decoder makes without a real target mask.
+- **Appearance color with true mask**: whether the learned RGB network
+  can render the right color if geometry is given correctly.
+- **Appearance color with learned mask**: whether the actual end-to-end
+  generation behaves differently from clean-mask RGB.
+
+All 24 examples, separate by shape, are preserved in a new JSON
+under central `storage/artifacts/sora/nano/mvp/shape-first-diagnose-.../`.
+
+The diagnostic **never** trains/changes model weights, uses no target
+mask for the random-prior sampling path, and cannot approve a release.
+It is deliberately model-architecture-specific; strict shape scoring
+uses reference masks only as **measurement templates** and never
+renders from them during inference.
+
+**Interpret the report before deciding how to proceed**:
+if held-out posterior reconstruction itself fails, stage-1
+underfitting needs attention. If posterior is good but random-prior
+shapes are invalid, the CVAE latent prior or conditioning must be
+redesigned/trained. If RGB from clean masks is incorrect, stage-2
+appearance learning needs attention. If only RGB from generated
+masks fails, the model has a mask-distribution mismatch.
+
+The current short pilot is **NOT accepted**. Draft PR #10 stays
+unmerged; no R2 sync, automatic CI, or release was triggered.
