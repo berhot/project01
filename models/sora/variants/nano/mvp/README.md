@@ -589,3 +589,72 @@ If warm-start does not fix missing triangles, investigate a stronger spatial
 shape-conditioning design, color/shape auxiliary objectives and time-dependent
 prompt sensitivity before spending more training compute. The RGB diffusion
 architecture and existing v1/v2 baselines are preserved independently.
+
+## Shape curriculum experiment: fine-tune the improved 2,500-step v2 checkpoint
+
+User's **actual model preview** after v1→v2 warm-start shows circle and
+square requests now largely recognizable, but **all triangle requests
+remain square-like**. At CFG 7.5, the warm-start v2 had **95.83% color
+accuracy but only 58.33% shape accuracy**. This is a genuine geometry
+failure, not simply a thresholding artifact. Do not add more classes yet.
+
+New opt-in features:
+- `--init-from-v2 PATH` loads an existing v2 RGB diffusion checkpoint,
+  checks architecture and vocabulary, and starts a **new** checkpoint
+  run. The optimizer is **reset**; this is fine-tuning, NOT an exact
+  optimizer-state training resume. Both v1 and v2 inputs cannot be
+  supplied simultaneously. Source checkpoint bytes are never modified.
+- `--triangle-fraction 0.50` makes 50% of the generated training
+  examples triangles, with the remaining half split between circles
+  and squares. All four colors are retained and randomized placements
+  remain. This is a **training-only** modification; inference remains
+  the learned RGB pixel denoiser. Default `--triangle-fraction` is
+  unset and the earlier balanced training sequence is unchanged.
+- All flags are optional, preserving existing checkpoint semantics.
+
+### Short integration check, no long training
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+SOURCE="storage/artifacts/sora/nano/mvp/pixel-20261103T004620Z-c92b5c0b/checkpoint.pt"
+test -f "$SOURCE" || { echo "Source v2 checkpoint missing"; false; }
+
+python3 -m scripts.pixel_diffusion train \
+  --dataset-version v2 \
+  --init-from-v2 "$SOURCE" \
+  --triangle-fraction 0.50 \
+  --steps 100 --batch-size 12 \
+  --base-channels 32 --diffusion-steps 100 \
+  --cfg-drop-prob 0.15 --learning-rate 0.00005 \
+  --device cpu --cpu-threads 2
+```
+
+The 100-step smoke run is only a software check. If it succeeds,
+run one independent **800-step** trial from `SOURCE` (not from the
+100-step smoke checkpoint) with the same flags and
+`--steps 800`. The lower learning rate is deliberate, to reduce
+forgetting of circles/squares/colors. Record the NEW checkpoint path
+printed by training, not a placeholder.
+
+Evaluate at guidance scales 5 and 7.5, seeds 42 and 123, then inspect
+`preview_grid.png` and run
+`python3 -m scripts.pixel_diagnose --evaluation-dir "$OUT"
+--output /tmp/sora-triangle-audit-NEW.json`. The diagnostic
+includes per-shape and per-concept strict accuracies.
+
+**Controlled comparison:** benchmark against the existing 2,500-step
+warm-start v2, **not** against v1. The targeted intervention is the
+triangle-heavy curriculum, but optimizer reset, training steps and LR
+also change; improvement does not isolate any one factor. Observe
+whether triangle recall improves **without degrading** color and
+circle/square accuracy. If triangles remain squares, don't
+automatically increase the number of steps: inspect the learned
+text-conditioned denoising representation and consider a shape-focused
+auxiliary loss or stronger spatial conditioning in a separate model
+revision. Do not interpret a falling noise MSE as proof of shape
+understanding.
