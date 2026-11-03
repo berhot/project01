@@ -152,7 +152,7 @@ def main():
     evaluation = sub.add_parser("evaluate")
     evaluation.add_argument("--layout-checkpoint", required=True)
     evaluation.add_argument("--spatial-checkpoint", required=True)
-    evaluation.add_argument("--output-dir", required=True)
+    evaluation.add_argument("--output-dir", default=None)
     evaluation.add_argument("--seed", type=int, default=42)
     evaluation.add_argument("--device", choices=("cpu", "mps", "cuda"), default="cpu")
     args = parser.parse_args()
@@ -162,7 +162,7 @@ def main():
         prior = restore_prior(args.layout_checkpoint, args.device)
         renderer = restore_renderer(args.spatial_checkpoint, args.device)
         print(json.dumps({
-            "preview_grid": str(evaluate(prior, renderer, args.output_dir, args.seed))
+            "preview_grid": str(evaluate(prior, renderer, args.output_dir or sora_run("layout-eval"), args.seed))
         }))
 
 
