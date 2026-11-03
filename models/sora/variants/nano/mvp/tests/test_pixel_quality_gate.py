@@ -70,6 +70,48 @@ class PixelQualityGateTests(unittest.TestCase):
             self.assertTrue(gate["accepted_by_toy_gate"])
             self.assertTrue(gate["human_visual_review_required"])
 
+    def test_legacy_missing_shared_noise_defaults_false(self):
+        """Original v2 reports predate --shared-noise and used per-prompt seeds."""
+        with tempfile.TemporaryDirectory() as d:
+            before,after=self.make_reports(d)
+            baseline=json.loads(before.read_text())
+            baseline.pop("shared_noise_across_concepts")
+            before.write_text(json.dumps(baseline))
+            reports=[
+                {"shape_accuracy_by_expected_shape":{
+                    "circle":1.0,"square":1.0,"triangle":0.0}},
+                {"shape_accuracy_by_expected_shape":{
+                    "circle":1.0,"square":1.0,"triangle":0.0}},
+            ]
+            with patch("scripts.pixel_quality_gate.audit_evaluation",
+                       side_effect=reports):
+                result=compare_reports(before,after)
+            self.assertFalse(result["accepted_by_toy_gate"])
+            self.assertTrue(result["checks"]["circles_preserved"])
+            self.assertTrue(result["checks"]["squares_preserved"])
+            self.assertFalse(result["checks"]["triangle_recognizable_heuristic"])
+
+    def test_legacy_missing_shared_noise_rejects_explicit_shared_noise(self):
+        with tempfile.TemporaryDirectory() as d:
+            before,after=self.make_reports(d)
+            baseline=json.loads(before.read_text())
+            baseline.pop("shared_noise_across_concepts")
+            before.write_text(json.dumps(baseline))
+            candidate=json.loads(after.read_text())
+            candidate["shared_noise_across_concepts"]=True
+            after.write_text(json.dumps(candidate))
+            with self.assertRaisesRegex(ValueError,"shared_noise_across_concepts"):
+                compare_reports(before,after)
+
+    def test_rejects_invalid_shared_noise_field_type(self):
+        with tempfile.TemporaryDirectory() as d:
+            before,after=self.make_reports(d)
+            candidate=json.loads(after.read_text())
+            candidate["shared_noise_across_concepts"]="false"
+            after.write_text(json.dumps(candidate))
+            with self.assertRaisesRegex(ValueError,"shared_noise_across_concepts"):
+                compare_reports(before,after)
+
     def test_refuses_unmatched_seeds_before_scoring(self):
         with tempfile.TemporaryDirectory() as d:
             before,after=self.make_reports(d,candidate_seed=123)
