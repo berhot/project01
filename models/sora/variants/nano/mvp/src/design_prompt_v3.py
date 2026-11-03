@@ -38,12 +38,12 @@ SHAPE_WORDS = {
     "triangle": ("triangle", "مثلث"),
 }
 CORNER_MODIFIERS = {
-    0.25: ("slightly rounded", "small rounded", "rounded a little",
+    0.25: ("slightly rounded", "small rounded", "slightly rounded corners", "small rounded corners", "rounded a little",
            "زوايا دائرية صغيرة", "زوايا مستديرة صغيرة", "حواف دائرية صغيرة"),
     0.5: ("rounded corners", "rounded square", "زوايا دائرية", "زوايا مستديرة",
           "حواف مستديرة", "حواف دائرية"),
     0.75: ("very rounded", "large rounded", "heavily rounded",
-           "large radius", "زوايا دائرية كبيرة", "زوايا مستديرة كبيرة",
+           "large radius", "large rounded corners", "very rounded corners", "square with large rounded corners", "زوايا دائرية كبيرة", "زوايا مستديرة كبيرة",
            "حواف مستديرة كبيرة", "حواف دائرية كبيرة"),
 }
 FILLER = ("create", "make", "draw", "generate", "design", "please",
