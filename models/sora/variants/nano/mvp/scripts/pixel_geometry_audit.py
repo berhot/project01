@@ -19,6 +19,7 @@ import torch
 
 from scripts.pixel_conditioning_audit import validation_items
 from scripts.pixel_diffusion import load_model, require_guidance_training
+from src.storage_paths import sora_run
 from src.pixel_diffusion import guided_noise, noise_schedule
 from src.pixel_metrics import analyze_image
 
@@ -155,7 +156,7 @@ def geometry_audit(model,seeds=(42,123),timesteps=(5,20,50,80),
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--checkpoint",required=True)
-    parser.add_argument("--output",required=True)
+    parser.add_argument("--output",default=None)
     parser.add_argument("--seeds",nargs="+",type=int,default=[42,123])
     parser.add_argument("--timesteps",nargs="+",type=int,
                         default=[5,20,50,80])
@@ -172,7 +173,7 @@ def main():
         guidance_scale=args.guidance_scale
     )
     result["checkpoint"]=args.checkpoint
-    path=Path(args.output)
+    path=Path(args.output) if args.output else sora_run("geometry-audit")/"report.json"
     path.parent.mkdir(parents=True,exist_ok=True)
     with path.open("x",encoding="utf-8") as stream:
         json.dump(result,stream,ensure_ascii=False,indent=2)
