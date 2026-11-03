@@ -495,3 +495,32 @@ general-purpose Arabic/English text-to-image foundation model. Next steps
 only after quality evaluation: more diverse licensed image-caption pairs,
 proper cross-attention/encoder design, higher resolution, and multi-object
 composition. Also review the provisional Sora family name before launch.
+
+## Dataset v2 10k-step result: accuracy regression, diagnostic required
+
+The user ran 10,000 v2 steps with CFG dropout 0.15 and base width 32.
+The training noise MSE fell to ~0.01, but the **strict 12-class toy
+prompt accuracy was only 8.33% at guidance 1/3, 16.67% at 5,
+and 25% at 7.5**, for each of seeds 42 and 123. This does
+**not** pass the v2 visual/semantic gate. See
+`SORA_PIXEL_V2_RESULTS.md` for checkpoint metadata and failure report.
+
+Run **the saved-output diagnostic without retraining**:
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+python3 -m scripts.pixel_diagnose \
+  --evaluation-dir /tmp/sora-v2-eval-1793665643 \
+  --output /tmp/sora-v2-audit-1793665643.json
+```
+
+The diagnostic loads existing v2 evaluation PNGs and reports and
+prints dominant-class counts, per-class confusion, EN/AR false agreement
+and same-seed image differences. It cannot establish human visual quality.
+Keep v1 and v2 checkpoints; wait to design the next training objective
+until the per-class failures and the galleries are inspected.
