@@ -16,7 +16,8 @@ from torch.nn import functional as F
 from src.pixel_dataset_v2 import (
     COLORS,SHAPES,caption_v2,synthetic_example_v2,tokenize_v2
 )
-from src.shape_field_v2 import layout_from_mask
+from src.shape_field_v2 import (layout_from_mask,draw_layout_from_noise,keyword_ids,SHAPE_WORDS)
+from src.pixel_diffusion import vocabulary_for
 from src.shape_first import mask_from_rgb
 
 
@@ -110,3 +111,32 @@ def shape_word_separation_objective(model,layouts,targets,tokens,
         "correct_logits":correct_logits,
         "wrong_tokens":wrong_tokens.detach(),
     }
+
+
+def circle_teacher_preservation(model,teacher,images,tokens,seed):
+    """Protect V2 circles at both training bboxes and new random layouts.
+
+    Teacher is the immutable frozen V2 learned mask model. Shapes other than
+    circle are learned via the V2.1 paired-shape objective. This does NOT
+    guarantee preserving independent generated image quality: actual
+    gallery and strict shape gate must still be checked.
+    """
+    if model.config!=teacher.config:
+        raise ValueError("Circle-preservation teacher must match configuration")
+    shapes=keyword_ids(tokens,SHAPE_WORDS)
+    vocab=vocabulary_for("v2")
+    selected=(shapes==vocab.index("circle"))|(shapes==vocab.index("دائرة"))
+    if int(selected.sum())<1:
+        raise ValueError("Circle-preservation batch needs real circle examples")
+    circle_tokens=tokens[selected]
+    truth=mask_from_rgb(images[selected])
+    observed=layout_from_mask(truth)
+    random_layouts=draw_layout_from_noise(
+        len(circle_tokens),seed,device=images.device)
+    layouts=torch.cat((observed,random_layouts),dim=0)
+    words=torch.cat((circle_tokens,circle_tokens),dim=0)
+    with torch.no_grad():
+        expected=teacher(layouts,words).sigmoid()
+    predicted=model(layouts,words).sigmoid()
+    difference=F.mse_loss(predicted,expected)
+    return {"loss":difference,"examples":len(words)}
