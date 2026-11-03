@@ -31,7 +31,8 @@ from src.shape_field_v2 import (
 )
 from src.storage_paths import sora_run
 from src.shape_field_v21 import (
-    matched_layout_shape_batch,shape_word_separation_objective
+    matched_layout_shape_batch,shape_word_separation_objective,
+    circle_teacher_preservation
 )
 
 MASK_KIND="sora-implicit-shape-field-v2"
@@ -97,7 +98,9 @@ def load_run(run_dir,device="cpu"):
 
 
 def train(args):
-    if (args.mask_steps<1 or args.color_steps<1 or
+    init_v2=getattr(args,"init_from_v2",None)
+    preserve_circle_weight=getattr(args,"circle_preserve_weight",0.2)
+    if (args.mask_steps<1 or args.color_steps<0 or
             args.batch_size<12 or args.batch_size%12 or
             args.log_every<1 or args.cpu_threads<1 or
             not math.isfinite(args.learning_rate) or args.learning_rate<=0):
@@ -107,6 +110,14 @@ def train(args):
     rank_weight=getattr(args,"rank_weight",0.1)
     rank_margin=getattr(args,"rank_margin",0.03)
     pair_examples=getattr(args,"paired_layout_count",4)
+    if init_v2 and not v21:
+        raise ValueError("V2 warm-start requires explicit --shape-v21")
+    if args.color_steps==0 and not (v21 and init_v2):
+        raise ValueError("Skipping color training requires V2.1 warm-start")
+    if not math.isfinite(preserve_circle_weight) or not 0<=preserve_circle_weight<=2:
+        raise ValueError("Invalid circle preservation weight")
+    if preserve_circle_weight>0 and v21 and not init_v2:
+        raise ValueError("V2.1 frozen circle preservation requires --init-from-v2")
     if v21 and (not all(math.isfinite(x) for x in (
             pair_weight,rank_weight,rank_margin))
             or not 0<pair_weight<=2 or not 0<=rank_weight<=1
@@ -120,7 +131,25 @@ def train(args):
     random.seed(args.seed)
     shape=NeuralMaskField(cfg).to(args.device)
     color=NeuralColorizer(cfg).to(args.device)
-    # Only a NEW dedicated path; NEVER load/copy V1, V3 or DDPM weights.
+    teacher=None
+    warm_start=None
+    if init_v2:
+        teacher,source_color,source_manifest=load_run(init_v2,args.device)
+        if (source_manifest.get("training_recipe","original-v2")!="original-v2"
+                or source_manifest.get("mask_architecture")!=MASK_KIND
+                or teacher.config!=cfg or source_color.config!=cfg):
+            raise ValueError("Expected matching original Shape Field V2 teacher checkpoint")
+        shape.load_state_dict(teacher.state_dict())
+        color.load_state_dict(source_color.state_dict())
+        teacher.eval()
+        teacher.requires_grad_(False)
+        warm_start={
+            "source_run_dir":str(init_v2),
+            "mask_source_sha256":source_manifest["sha256"]["mask_field.pt"],
+            "color_source_sha256":source_manifest["sha256"]["colorizer.pt"],
+            "method":"copy both model weights, reset optimizer, optionally keep colorizer frozen",
+        }
+    # Only a NEW dedicated path; NEVER overwrite V1, V3 or DDPM weights.
     run=sora_run("shape-field-v21" if v21 else "shape-field-v2",args.output_root)
     run.mkdir(parents=True,exist_ok=False)
     try:
@@ -133,6 +162,7 @@ def train(args):
             loss=geometry_objective(shape,images,tokens)
             paired=None
             total=loss["loss"]
+            preserved=None
             if v21:
                 pair_layouts,pair_masks,pair_tokens,_=matched_layout_shape_batch(
                     step,pair_examples,args.seed,args.device
@@ -142,6 +172,11 @@ def train(args):
                     ranking_margin=rank_margin,ranking_weight=rank_weight
                 )
                 total=total+pair_weight*paired["loss"]
+                if teacher is not None and preserve_circle_weight>0:
+                    preserved=circle_teacher_preservation(
+                        shape,teacher,images,tokens,args.seed+step*17
+                    )
+                    total=total+preserve_circle_weight*preserved["loss"]
             if not torch.isfinite(total):
                 raise FloatingPointError("Nonfinite neural geometry loss")
             total.backward()
@@ -163,6 +198,11 @@ def train(args):
                             paired["correct_shape_word_win_rate"]),4),
                         "correct_vs_wrong_word_bce_advantage":round(float(
                             paired["correct_vs_wrong_word_bce_advantage"]),6)
+                    })
+                if preserved is not None:
+                    report.update({
+                        "circle_teacher_mse":round(float(preserved["loss"].detach()),7),
+                        "circle_teacher_samples":preserved["examples"],
                     })
                 print(json.dumps(report),flush=True)
         _save_weight(run/"mask_field.pt",shape,MASK_KIND,args.mask_steps,args.seed)
@@ -197,6 +237,9 @@ def train(args):
             "batch_size":args.batch_size,"learning_rate":args.learning_rate,
             "seed":args.seed,
             "training_recipe":("shape-word-matched-layout-v2.1" if v21 else "original-v2"),
+            "warm_start":warm_start,
+            "colorizer_reused_untrained":bool(args.color_steps==0 and init_v2),
+            "circle_teacher_weight":preserve_circle_weight if teacher is not None else None,
             "paired_shape_objective":({
                 "pair_weight":pair_weight,
                 "rank_weight":rank_weight,
@@ -372,6 +415,9 @@ def main():
     tr.add_argument("--rank-weight",type=float,default=0.1)
     tr.add_argument("--rank-margin",type=float,default=0.03)
     tr.add_argument("--paired-layout-count",type=int,default=4)
+    tr.add_argument("--init-from-v2",default=None,
+                    help="Optional exact original V2 run dir; clone weights into NEW V2.1 run")
+    tr.add_argument("--circle-preserve-weight",type=float,default=0.2)
     ev=commands.add_parser("evaluate")
     ev.add_argument("--run-dir",required=True)
     ev.add_argument("--seed",type=int,default=42)
