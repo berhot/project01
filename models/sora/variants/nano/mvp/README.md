@@ -658,3 +658,87 @@ text-conditioned denoising representation and consider a shape-focused
 auxiliary loss or stronger spatial conditioning in a separate model
 revision. Do not interpret a falling noise MSE as proof of shape
 understanding.
+
+## Experimental shape conditioning: spatial token attention (separate architecture)
+
+### Why this is needed
+
+The user's 800-step triangle-heavy v2 fine-tuning **failed** the actual
+geometry check: at guidance 5.0, circles 100%, squares 100%, and **triangles
+0%**, on both seeds 42 and 123. Lower noise MSE, more triangle exposure and
+larger CFG did not fix this. The image gallery visibly confirmed rectangular
+outputs for nearly all triangle prompts.
+
+The original `rgb-unet-text-v1` conditions its entire RGB denoiser on
+a single **mean-pooled word vector**. The new opt-in
+`rgb-unet-spatial-text-v2` can attend **per pixel** to individual
+English/Arabic text tokens at both 32×32 and 16×16 feature scales,
+allowing shape terms to influence local geometry instead of only a
+global feature vector. This is still entirely learned neural denoising
+with input RGB noise at inference, **no shape drawing at inference**.
+
+The experimental objective also uses a **training-only silhouette Dice
+loss** from the real RGB training pixels, only for less-noisy timesteps.
+It encourages foreground layout and boundaries while keeping ordinary
+noise-prediction MSE. Both loss parts are logged separately.
+No triangle target template enters the inference pipeline. This loss
+is a research approximation and can itself have failure modes.
+
+**Backwards compatibility:**
+- `--conditioning pooled` is default; all old v1/v2 checkpoints remain
+  the same `rgb-unet-text-v1` architecture.
+- `--conditioning spatial` is opt-in for v2 only; it produces
+  `rgb-unet-spatial-text-v2` checkpoints.
+- `--init-from-v2` accepts the user's trained v2 pooled checkpoint and
+  transfers matching RGB weights. The new attention output projections
+  start at **zero**, so the new model initially predicts the SAME RGB
+  noise as the source until the attention learns.
+- Source checkpoints are never overwritten. The new run resets AdamW
+  state (fine-tune, not an optimizer-accurate resume).
+- Classifier-free guidance and the bilingual 12-class evaluation apply
+  to both architectures.
+- The Sora visual GitHub Actions workflow remains **manual-only**.
+
+### Tests and a bounded 100-step verification
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+
+python3 -m unittest discover -s tests -v
+
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T004620Z-c92b5c0b/checkpoint.pt"
+test -f "$BASE" || { echo "Missing original 2500-step v2 baseline"; false; }
+
+python3 -m scripts.pixel_diffusion train \
+  --dataset-version v2 --conditioning spatial \
+  --init-from-v2 "$BASE" \
+  --triangle-fraction 0.50 --silhouette-weight 0.15 \
+  --steps 100 --batch-size 12 --base-channels 32 \
+  --diffusion-steps 100 --cfg-drop-prob 0.15 \
+  --learning-rate 0.00005 --device cpu --cpu-threads 2
+```
+
+The 100-step run is for **integration tests only**, not a promise that
+triangles are fixed. It writes a NEW checkpoint with the
+`rgb-unet-spatial-text-v2` architecture, and logs
+`noise_mse`, `silhouette_dice_loss`, and `total_loss`.
+If tests/short training fail, stop and fix that issue before launching
+longer training.
+
+If 100 steps succeed, a controlled comparison is one **800-step**
+independent spatial run initialized from `BASE`, with the same LR,
+triangle mix and seed as the old 800-step pooled trial, and CFG scale
+5 plus seed 42/123. The only intended experimental changes are the
+spatial architecture and silhouette objective (both active together);
+a separate ablation with `--silhouette-weight 0` would be necessary
+to isolate individual contributions.
+
+The previous model's **triangle accuracy is 0%**. A genuine success
+requires visible triangles and improved per-shape/strict prompt
+metrics without losing circle, square or color accuracy. Do not claim
+success from low training loss alone. If triangles remain rectangles,
+stop the experiment and reconsider representation or data design,
+rather than repeatedly extending CPU training.
