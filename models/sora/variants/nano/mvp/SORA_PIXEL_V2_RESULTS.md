@@ -418,3 +418,59 @@ Then generate one 24-image CFG-5 posterior-mean preview from NEW,
 with independent normal per-class seeds to stay comparable with prior
 model evaluation; visually inspect triangle silhouettes. This is
 still 32×32 synthetic single-object research, not general image AI.
+
+## Critical regression: 50-step matched shape objective harms generation (2026-11-03)
+
+User's Mac **63/63 tests passed** (including the bilingual-balanced probe).
+The previously trained spatial-v2 800-step baseline and the new
+50-step paired-loss checkpoint were compared using identical validation
+pairs, CFG scale 5.0, posterior-mean sampler and seed 42.
+
+| Measurement | Base spatial model | 50-step paired-loss model |
+|---|---:|---:|
+| Matched prompt difference RMS | 0.032862 | 0.217834 |
+| Expected difference RMS | 0.367838 | 0.367838 |
+| Prompt difference / expected | 0.089338 | 0.592200 |
+| Prompt response cosine alignment | -0.009628 | 0.633999 |
+| Color accuracy (24 generated images) | 100% | 62.50% |
+| Circle accuracy | 100% | **0%** |
+| Square accuracy | 100% | 100% |
+| Triangle accuracy | 0% | **0%** |
+| Strict prompt accuracy | 66.67% | **29.17%** |
+| Bilingual both correct | 66.67% | 25.00% |
+
+The actual contact sheet shows nearly blank/pale circles, colorful
+rectangles where squares are requested, and incoherent noisy blocks
+where triangles should be. **This is a major regression, not a success.**
+
+- Source best spatial checkpoint:
+  `storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt`
+- Failed 50-step paired checkpoint (preserve for research, not best):
+  `storage/artifacts/sora/nano/mvp/pixel-20261103T124924Z-b7835e13/checkpoint.pt`
+- User outputs: `/tmp/sora-paired-review-1793710487`
+- Training paired weight was 0.35, larger than the ordinary
+  low-MSE denoising signal. The paired task also uses a special
+  midpoint-noise input rather than normal forward diffusion images.
+  Those mechanisms are **plausible** causes of catastrophic forgetting,
+  but a matched ablation is necessary to distinguish them.
+
+### New safeguards (code committed; Mac execution pending)
+
+An opt-in frozen checkpoint **teacher-preservation** objective protects
+circle/square predictions and the null CFG branch on ordinary
+q(x_t|x0) noised RGB training examples. This is teacher regularization,
+not replacing the true pixel diffusion model, and it does not insert
+procedural shapes at inference. Enable with
+`--preserve-weight 1.0 --preserve-null-weight 0.5`, requiring a matching
+spatial-v2 source via `--init-from-v2`. Defaults remain off.
+
+In the next trial use **paired weight 0.02, not 0.35**, and stop at
+**20 steps**. The no-retraining `scripts.pixel_quality_gate` compares
+candidate vs source reports using the SAME prompts/seeds/sampler/CFG.
+It requires a recognizable triangle heuristic improvement while
+retaining circles, squares, colors and total prompt correctness.
+The gate itself is NOT visual proof; inspect the actual 24 PNGs.
+
+**Do not continue to 300 or 10,000 steps if either the gate fails
+or the visual triangles are still missing.** Preserve all checkpoints;
+PR remains draft and GitHub Actions manual-only.
