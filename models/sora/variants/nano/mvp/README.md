@@ -1212,3 +1212,64 @@ so heuristic shape labels at early timesteps **do not establish
 correctness**. Compare late-stage silhouettes and the final images
 to determine if the triangle semantics disappear in reverse sampling.
 Run **no further training** pending this analysis.
+
+## High-noise clipping ablation — no retraining
+
+The user ran 82 tests successfully and collected matched-noise,
+100-step English and Arabic red square-vs-triangle trajectories.
+At timestep 99, **99.2–99.4% of raw x0 RGB values needed clipping**.
+At timestep 49, square/triangle mask IoU was **93.2–93.7%** and both
+final triangle outputs were classified (and visually looked) like
+**squares**. This is direct evidence of an early reverse-trajectory
+shape collapse; it does *not* prove clipping caused it.
+
+The inference-only option `--x0-clipping dynamic` uses a per-image
+99.5th-percentile dynamic threshold on raw clean-image estimates
+instead of fixed [-1,1] clipping. It may preserve relative contrast
+when raw x0 is enormous at high-noise steps. The policy is applied
+inside the learned RGB reverse-diffusion process; it does not draw
+any shape or change the checkpoint. It may also degrade images.
+
+**Default `fixed` preserves existing code behavior**. All training,
+weight loading and checkpoint formats remain unchanged.
+
+Run tests first, then compare both policies on the same existing
+checkpoint, seed 42, CFG 5, and posterior-mean sampling. This is
+only an ablation: *do not promote the dynamic sampler based on
+toy metrics without inspecting the 24-image previews.*
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+CKPT="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+test -f "$CKPT" || { echo "Missing checkpoint"; false; }
+OUT="/tmp/sora-x0-ablation-$(date +%s)"
+
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$CKPT" --sampler posterior_mean \
+  --guidance-scales 5 --seeds 42 \
+  --x0-clipping fixed --output-dir "$OUT-fixed"
+
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$CKPT" --sampler posterior_mean \
+  --guidance-scales 5 --seeds 42 \
+  --x0-clipping dynamic --output-dir "$OUT-dynamic"
+
+open "$OUT-fixed/guidance_5_seed_42/preview_grid.png"
+open "$OUT-dynamic/guidance_5_seed_42/preview_grid.png"
+```
+
+The `scripts.pixel_quality_gate` intentionally refuses to compare
+different `x0_clipping` policies as a like-for-like checkpoint
+promotion test; the default fixed mode is implicit in older reports.
+Use the two separately labeled summaries and visual galleries
+to decide whether clipping is contributing. If the dynamic
+variant still cannot generate triangles, or sacrifices circles,
+squares or color accuracy, keep the original fixed sampler.
+No more training is warranted by these diagnostics alone.
+
+**New test code is committed but has not yet run on the Mac.**
