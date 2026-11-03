@@ -156,6 +156,12 @@ class ShapeFirstModelTests(unittest.TestCase):
             self.assertEqual(report["images"],24)
             self.assertEqual(len(report["items"]),24)
             self.assertTrue((root/"eval"/"preview_grid.png").exists())
+            self.assertTrue((root/"eval"/"learned_masks_preview_grid.png").exists())
+            self.assertEqual(len(list((root/"eval"/"learned_masks").glob("*.png"))),24)
+            self.assertTrue(all(
+                (root/"eval"/item["learned_mask"]).is_file()
+                for item in report["items"]
+            ))
             quality=audit_gallery(root/"eval")
             self.assertEqual(quality["sample_count"],24)
             self.assertEqual(sum(x["samples"] for x in quality["by_shape"].values()),24)
