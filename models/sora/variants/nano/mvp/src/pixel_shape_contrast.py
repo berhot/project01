@@ -159,9 +159,20 @@ def paired_prompt_probe(model, seed=42, pairs=8, step=1):
     conditional denoising; never trains weights or draws images at inference.
     """
     model.eval()
-    images,tokens,details=matched_shape_batch(
-        step,pairs,seed,split="validation"
-    )
+    # A single step's colors correlate with its EN/AR assignments.
+    # For every 8 pairs, use two steps separated by two so all four
+    # colors occur in BOTH languages. Preserve same geometry within pair.
+    sample_images,sample_tokens,details=[],[],[]
+    for block in range((pairs+3)//4):
+        count=min(4,pairs-4*block)
+        batch_images,batch_tokens,batch_details=matched_shape_batch(
+            step+2*block,count,seed,split="validation"
+        )
+        sample_images.append(batch_images)
+        sample_tokens.append(batch_tokens)
+        details.extend(batch_details)
+    images=torch.cat(sample_images,dim=0)
+    tokens=torch.cat(sample_tokens,dim=0)
     device=next(model.parameters()).device
     images,tokens=images.to(device),tokens.to(device)
     rng=torch.Generator(device=device).manual_seed(seed)
@@ -184,6 +195,14 @@ def paired_prompt_probe(model, seed=42, pairs=8, step=1):
     ).mean())
     return {
         "pairs":pairs,"step":step,"seed":seed,
+        "probe_protocol":"matched-v2-multistep-language-balanced",
+        "per_color_language_counts":{
+            f"{color}_{language}":sum(
+                row["color"]==color and row["language"]==language
+                for row in details
+            )
+            for color in COLORS for language in ("en","ar")
+        },
         "expected_epsilon_difference_rms":round(expected_norm,6),
         "predicted_epsilon_difference_rms":round(delta_norm,6),
         "prompt_difference_ratio":round(
