@@ -121,6 +121,39 @@ jobs:
               assert "bilingual_both_correct" in metrics
           print("CFG comparison and toy metrics schema passed; NO quality claim")
           PY
+      - name: Inspect v2 procedural dataset (not model output)
+        run: |
+          python -m scripts.dataset_v2 preview \
+            --split validation --seed 42 \
+            --output-dir /tmp/sora-dataset-v2-preview
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path("/tmp/sora-dataset-v2-preview/manifest.json").read_text())
+          assert manifest["samples"]==24
+          assert manifest["classes"]==12
+          assert "NOT diffusion-generated" in manifest["source"]
+          PY
+      - name: v2 RGB diffusion checkpoint and bilingual smoke inference
+        run: |
+          python -m scripts.pixel_diffusion train \
+            --dataset-version v2 --steps 12 --batch-size 12 \
+            --base-channels 16 --cfg-drop-prob 0.15 \
+            --device cpu --cpu-threads 2 --output-root /tmp/sora-pixel-v2-smoke
+          PIXEL_V2=$(find /tmp/sora-pixel-v2-smoke -name checkpoint.pt -type f | head -n 1)
+          test -n "$PIXEL_V2"
+          python -m scripts.pixel_diffusion evaluate \
+            --checkpoint "$PIXEL_V2" --sampler ddim --sample-steps 4 \
+            --guidance-scale 3 --output-dir /tmp/sora-pixel-v2-preview
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path("/tmp/sora-pixel-v2-preview/report.json").read_text())
+          assert report["dataset_version"] == "v2"
+          assert len(report["items"]) == 24
+          assert report["metrics"]["bilingual_pairs"] == 12
+          print("v2 infrastructure smoke passed; NO visual-quality claim")
+          PY
       - name: Upload genuine learned samples
         if: always()
         uses: actions/upload-artifact@v4
@@ -133,4 +166,6 @@ jobs:
             /tmp/sora-learned-layout-seed123/
             /tmp/sora-pixel-preview/
             /tmp/sora-guidance-check/
+            /tmp/sora-dataset-v2-preview/
+            /tmp/sora-pixel-v2-preview/
           if-no-files-found: ignore
