@@ -9,6 +9,7 @@ import math
 from pathlib import Path
 
 from scripts.pixel_diffusion import evaluate, load_model, require_guidance_training
+from src.storage_paths import sora_run
 
 
 def compare(model, output_dir, scales=(1.0,3.0,5.0,7.5), seeds=(42,),
@@ -59,7 +60,8 @@ def compare(model, output_dir, scales=(1.0,3.0,5.0,7.5), seeds=(42,),
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--output-dir", default=None,
+                        help="Default: a unique central BERHOT artifact run")
     parser.add_argument("--guidance-scales", type=float, nargs="+",
                         default=[1.0,3.0,5.0,7.5])
     parser.add_argument("--seeds", type=int, nargs="+", default=[42])
@@ -73,12 +75,13 @@ def main():
     parser.add_argument("--device", choices=("cpu","mps","cuda"), default="cpu")
     args = parser.parse_args()
     model = load_model(args.checkpoint, args.device)
+    output_dir=args.output_dir or str(sora_run("pixel-metrics"))
     summary = compare(
-        model,args.output_dir,args.guidance_scales,args.seeds,
+        model,output_dir,args.guidance_scales,args.seeds,
         args.sampler,args.sample_steps,args.shared_noise,args.x0_clipping,
     )
     print(json.dumps({
-        "summary":str(Path(args.output_dir) / "summary.json"),
+        "summary":str(Path(output_dir) / "summary.json"),
         "runs":len(summary["results"]),
         "scores":[{
             "guidance_scale":r["guidance_scale"],"seed":r["seed"],
