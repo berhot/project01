@@ -89,12 +89,22 @@ def shape_word_separation_objective(model,layouts,targets,tokens,
         probability.sum((1,2,3))+targets.sum((1,2,3))+1)
     recon=bce.mean()+dice.mean()
 
-    # Shape label rotates within each 6-entry same-layout group;
-    # color and language stay identical.
+    # Rotate the SHAPE WORD ONLY within each 6-entry same-layout group.
+    # Copying full captions would also change Arabic gendered adjectives:
+    # "دائرة صفراء" vs "مثلث أصفر". Color and all other token IDs
+    # must stay exactly as supplied in the original caption.
     shape_group=len(targets)//6
     indices=torch.arange(len(targets),device=targets.device).reshape(shape_group,3,2)
     wrong_indices=indices.roll(shifts=1,dims=1).reshape(-1)
-    wrong_tokens=tokens[wrong_indices]
+    source_shape=keyword_ids(tokens,SHAPE_WORDS)
+    alternative_shape=keyword_ids(tokens[wrong_indices],SHAPE_WORDS)
+    if bool((source_shape==alternative_shape).any()):
+        raise ValueError("Counterfactual shape word must be different")
+    wrong_tokens=torch.where(
+        tokens.eq(source_shape[:,None]),
+        alternative_shape[:,None],
+        tokens,
+    )
     wrong_logits=model(layouts,wrong_tokens)
     wrong_bce=F.binary_cross_entropy_with_logits(
         wrong_logits,targets,reduction="none").mean((1,2,3))
