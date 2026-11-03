@@ -19,6 +19,7 @@ from PIL import Image, ImageDraw
 import torch
 
 from scripts.pixel_diffusion import load_model, require_guidance_training
+from src.storage_paths import sora_run
 from src.pixel_dataset_v2 import COLORS, caption_v2
 from src.pixel_diffusion import guided_noise, noise_schedule, save_image, tokenize
 from src.pixel_metrics import analyze_image
@@ -183,7 +184,7 @@ def export_trace(report,snapshots,final,output_dir,scale=5):
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--checkpoint",required=True)
-    p.add_argument("--output-dir",required=True)
+    p.add_argument("--output-dir",default=None)
     p.add_argument("--color",choices=tuple(COLORS),default="red")
     p.add_argument("--language",choices=("ar","en"),default="en")
     p.add_argument("--seed",type=int,default=42)
@@ -197,10 +198,11 @@ def main():
     report,snapshots,final=trace_pair(
         model,args.color,args.language,args.seed,args.guidance_scale
     )
-    result=export_trace(report,snapshots,final,args.output_dir)
+    output_dir=args.output_dir or str(sora_run("reverse-trace"))
+    result=export_trace(report,snapshots,final,output_dir)
     result["checkpoint"]=args.checkpoint
     print(json.dumps({
-        "report":str(Path(args.output_dir)/"report.json"),
+        "report":str(Path(output_dir)/"report.json"),
         "preview_grid":result["preview_grid"],
         "all_reverse_timesteps_executed":result["all_reverse_timesteps_executed"],
         "final_predictions":result["final_predictions"],
