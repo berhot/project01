@@ -26,6 +26,7 @@ from src.pixel_dataset_v2 import (
 )
 from src.pixel_shape_contrast import matched_shape_batch, matched_shape_objective
 from src.pixel_preservation import preservation_objective
+from src.pixel_shape_v3 import high_noise_v3_objective
 from src.storage_paths import sora_run
 
 PROMPTS = [
@@ -187,6 +188,12 @@ def train(args):
     paired_silhouette_weight = getattr(args,"paired_silhouette_weight",0.5)
     preserve_weight = getattr(args,"preserve_weight",0.0)
     preserve_null_weight = getattr(args,"preserve_null_weight",0.5)
+    shape_v3 = getattr(args,"shape_v3",False)
+    v3_noise_weight = getattr(args,"v3_noise_weight",0.15)
+    v3_contrast_weight = getattr(args,"v3_contrast_weight",0.1)
+    v3_margin = getattr(args,"v3_margin",0.003)
+    v3_low_fraction = getattr(args,"v3_low_fraction",0.55)
+    v3_high_fraction = getattr(args,"v3_high_fraction",0.85)
     if conditioning not in ("pooled","spatial"):
         raise ValueError("conditioning must be pooled or spatial")
     if conditioning=="spatial" and args.dataset_version!="v2":
@@ -216,6 +223,22 @@ def train(args):
         raise ValueError("Triangle curriculum is only supported for dataset v2")
     if triangle_fraction is not None and not 0 <= triangle_fraction <= 1:
         raise ValueError("triangle_fraction must be in [0,1]")
+    if shape_v3:
+        if (args.dataset_version!="v2" or conditioning!="spatial"
+                or not init_v2 or preserve_weight<=0
+                or triangle_fraction is not None or paired_shape_weight!=0
+                or args.batch_size%12!=0):
+            raise ValueError(
+                "Shape V3 requires spatial v2 source, teacher preservation, "
+                "12-concept balanced batches, no triangle oversampling, "
+                "and NO failed midpoint-paired objective"
+            )
+        if (not all(np.isfinite(v) for v in (v3_noise_weight,v3_contrast_weight,
+                    v3_margin,v3_low_fraction,v3_high_fraction))
+                or not (0<=v3_noise_weight<=1 and 0<=v3_contrast_weight<=1
+                        and 0<v3_margin<=0.1
+                        and 0<=v3_low_fraction<v3_high_fraction<1)):
+            raise ValueError("Invalid V3 high-noise objective settings")
     if args.device=="cpu": torch.set_num_threads(args.cpu_threads)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -273,6 +296,22 @@ def train(args):
             loss=training_loss(model,images,tokens,cfg_drop_prob=args.cfg_drop_prob)
             noise_value=float(loss.detach())
             silhouette_value=None
+        v3_log=None
+        if shape_v3:
+            v3=high_noise_v3_objective(
+                model,images,tokens,noise_weight=v3_noise_weight,
+                contrast_weight=v3_contrast_weight,margin=v3_margin,
+                low_fraction=v3_low_fraction,high_fraction=v3_high_fraction
+            )
+            loss=loss+v3["total_loss"]
+            v3_log={
+                "v3_high_noise_mse":round(float(v3["high_noise_mse"]),6),
+                "v3_shape_contrast_loss":round(float(v3["contrast_loss"]),6),
+                "v3_correct_word_win_rate":round(float(v3["correct_shape_word_win_rate"]),4),
+                "v3_correct_word_mse_advantage":round(float(v3["correct_shape_word_mse_advantage"]),6),
+                "v3_lowest_timestep":int(v3["sampled_times"].min()),
+                "v3_highest_timestep":int(v3["sampled_times"].max()),
+            }
         paired_log=None
         if paired_shape_weight > 0:
             pair_images,pair_tokens,_=matched_shape_batch(
@@ -311,6 +350,9 @@ def train(args):
             if paired_log is not None:
                 report.update(paired_log)
                 report["total_loss"]=round(float(loss.detach()),6)
+            if v3_log is not None:
+                report.update(v3_log)
+                report["total_loss"]=round(float(loss.detach()),6)
             if preserve_log is not None:
                 report.update(preserve_log)
                 report["total_loss"]=round(float(loss.detach()),6)
@@ -332,6 +374,15 @@ def train(args):
         "preserve_weight":preserve_weight,
         "preserve_null_weight":preserve_null_weight if preserve_weight>0 else None,
         "preserve_teacher_checkpoint":str(init_v2) if preserve_weight>0 else None,
+        "shape_learning_recipe":("v3-valid-q-high-noise-shape-contrast-v1" if shape_v3 else None),
+        "v3_high_noise":({
+            "noise_weight":v3_noise_weight,
+            "contrast_weight":v3_contrast_weight,
+            "margin":v3_margin,
+            "low_fraction":v3_low_fraction,
+            "high_fraction":v3_high_fraction,
+            "batching":"all 12 color-shape concepts each batch; Arabic/English alternate each step",
+        } if shape_v3 else None),
         "model":{k:v.detach().cpu() for k,v in model.state_dict().items()},
         "seed":args.seed,"training_steps":args.steps,
         "training_distribution":(
@@ -435,6 +486,13 @@ def main():
                    help="Optional frozen-source circle/square denoising preservation loss")
     t.add_argument("--preserve-null-weight",type=float,default=0.5,
                    help="Weight on teacher CFG null-prompt preservation")
+    t.add_argument("--shape-v3",action="store_true",
+                   help="Experimental valid-q high-noise contrast: requires balanced v2 spatial teacher-preserved fine-tune")
+    t.add_argument("--v3-noise-weight",type=float,default=0.15)
+    t.add_argument("--v3-contrast-weight",type=float,default=0.1)
+    t.add_argument("--v3-margin",type=float,default=0.003)
+    t.add_argument("--v3-low-fraction",type=float,default=0.55)
+    t.add_argument("--v3-high-fraction",type=float,default=0.85)
     t.add_argument("--diffusion-steps",type=int,default=100)
     t.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     t.add_argument("--cpu-threads",type=int,default=2)
