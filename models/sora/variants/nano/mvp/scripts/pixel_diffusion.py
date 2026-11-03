@@ -45,6 +45,72 @@ def load_model(path,device="cpu"):
     return model.to(device)
 
 
+def initialize_v2_from_v1(model, checkpoint):
+    """Warm-start v2 RGB pixels from a trained v1 RGB checkpoint.
+
+    All U-Net/time/text-projection weights are transferred. Existing vocabulary
+    rows keep their indices. Only new v2 token rows need initialization.
+    This is weight transfer, not a procedural inference shortcut or v2 success.
+    """
+    if model.config.dataset_version != "v2":
+        raise ValueError("Warm start is only supported for a new v2 model")
+    source = load_model(checkpoint, "cpu")
+    if source.config.dataset_version != "v1":
+        raise ValueError("Warm start requires a v1 RGB pixel checkpoint")
+    for field in ("channels", "text_dim", "diffusion_steps", "image_size",
+                  "max_tokens", "architecture"):
+        if getattr(source.config, field) != getattr(model.config, field):
+            raise ValueError(f"Incompatible warm-start architecture: {field}")
+    old_state = source.state_dict()
+    new_state = model.state_dict()
+    if set(old_state) != set(new_state):
+        raise ValueError("Warm-start state keys differ")
+    for name, tensor in old_state.items():
+        if name == "text.token.weight":
+            if (tensor.ndim != 2 or new_state[name].shape[0] <= tensor.shape[0]
+                    or new_state[name].shape[1] != tensor.shape[1]):
+                raise ValueError("Unexpected vocabulary expansion")
+            new_state[name][:tensor.shape[0]] = tensor.to(
+                device=new_state[name].device, dtype=new_state[name].dtype
+            )
+            # Semantic interpolation is only an INITIALIZATION; training must
+            # learn these new word vectors and all new image concepts.
+            old_words = vocabulary_for("v1")
+            new_words = vocabulary_for("v2")
+            synonyms = {
+                "yellow": ("red", "green"),
+                "triangle": ("circle", "square"),
+                "مثلث": ("مربع", "دائرة"),
+                "أصفر": ("أحمر", "أخضر"),
+                "صفراء": ("حمراء", "خضراء"),
+                "light": ("white", "background"),
+                "فاتحة": ("بيضاء", "خلفية"),
+            }
+            for word, components in synonyms.items():
+                if word not in new_words:
+                    continue
+                if any(w not in old_words for w in components):
+                    raise ValueError(f"Unknown warm-start embedding components for {word}")
+                new_state[name][new_words.index(word)] = torch.stack([
+                    tensor[old_words.index(w)] for w in components
+                ]).mean(0).to(new_state[name].device)
+        else:
+            if new_state[name].shape != tensor.shape:
+                raise ValueError(f"Incompatible warm-start tensor: {name}")
+            new_state[name] = tensor.to(
+                device=new_state[name].device, dtype=new_state[name].dtype
+            ).clone()
+    model.load_state_dict(new_state, strict=True)
+    return {
+        "source_checkpoint": str(checkpoint),
+        "source_dataset_version": "v1",
+        "source_training_steps": torch.load(
+            checkpoint, map_location="cpu", weights_only=True
+        ).get("training_steps"),
+        "method": "v1 to v2 weight transfer, new token embeddings initialized by semantic averaging",
+    }
+
+
 def require_guidance_training(model, guidance_scale):
     if guidance_scale != 1.0 and getattr(model, "cfg_drop_prob", 0.0) <= 0:
         raise ValueError(
@@ -65,6 +131,10 @@ def train(args):
     cfg=PixelConfig(channels=args.channels,diffusion_steps=args.diffusion_steps,
                     dataset_version=args.dataset_version)
     model=PixelDenoiser(cfg).to(args.device)
+    warm_start = None
+    if args.init_from_v1 is not None:
+        warm_start = initialize_v2_from_v1(model, args.init_from_v1)
+        print(json.dumps({"warm_start":warm_start},ensure_ascii=False),flush=True)
     optimizer=torch.optim.AdamW(model.parameters(),lr=args.learning_rate)
     run=Path(args.output_root)/(
         "pixel-"+time.strftime("%Y%m%dT%H%M%SZ",time.gmtime())+"-"+uuid.uuid4().hex[:8])
@@ -99,6 +169,7 @@ def train(args):
         "config":asdict(cfg),"vocabulary":list(vocabulary_for(cfg.dataset_version)),
         "dataset_version":cfg.dataset_version,
         "cfg_drop_prob":args.cfg_drop_prob,
+        "warm_start":warm_start,
         "model":{k:v.detach().cpu() for k,v in model.state_dict().items()},
         "seed":args.seed,"training_steps":args.steps,
         "training_distribution":(
@@ -180,6 +251,7 @@ def main():
     t.add_argument("--base-channels","--channels",dest="channels",type=int,default=32)
     t.add_argument("--cfg-drop-prob",type=float,default=0.15)
     t.add_argument("--dataset-version",choices=("v1","v2"),default="v1")
+    t.add_argument("--init-from-v1",default=None,help="Optional original v1 RGB checkpoint to warm-start new v2 model")
     t.add_argument("--diffusion-steps",type=int,default=100)
     t.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     t.add_argument("--cpu-threads",type=int,default=2)
