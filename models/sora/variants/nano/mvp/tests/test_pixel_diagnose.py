@@ -70,6 +70,23 @@ class PixelDiagnoseTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 analyze_directory(root,output)
 
+    def test_same_noise_shape_comparison_exposes_identical_squares(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            run=self.make_fixture(root)
+            path=run/"report.json"
+            report=json.loads(path.read_text(encoding="utf-8"))
+            report["shared_noise_across_concepts"]=True
+            path.write_text(json.dumps(report),encoding="utf-8")
+            audit=audit_evaluation(path)
+            self.assertTrue(audit["shared_noise_across_concepts"])
+            self.assertEqual(audit["mean_square_triangle_mask_iou"],1.0)
+            self.assertEqual(len(audit["square_triangle_same_noise_comparison"]),8)
+            self.assertTrue(all(
+                item["square_triangle_pixel_mae"]==0
+                for item in audit["square_triangle_same_noise_comparison"]
+            ))
+
     def test_missing_png_is_error_not_silent_guess(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
