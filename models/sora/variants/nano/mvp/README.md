@@ -1490,3 +1490,40 @@ been run on the user's Mac. **Then** follow
 and the identical-seed baseline/candidate quality comparison.
 No long training, baseline replacement, release packaging,
 or background CI is authorized.
+
+
+## New Sora Shape-first V1 (separate learned generative architecture)
+
+After the original RGB DDPM and V3 both generated **0/8**
+recognizable triangles, a new opt-in two-stage pipeline was added:
+`src/shape_first.py` and `scripts/shape_first.py`.
+
+- **Trained conditional mask CVAE:** learns shape pixels from training
+  RGB masks and bilingual prompts. At inference it samples a Gaussian
+  latent and decodes a mask using trained weights, not PIL shape drawing.
+- **Trained RGB appearance network:** maps the learned mask plus
+  prompt tokens into RGB pixels using learned weights, not a
+  procedural shape/color template.
+- **Source isolation:** writes new `shape-first-.../` artifact runs,
+  containing independent `mask.pt`, `appearance.pt` and
+  checksum-verified `run.json`; neither old RGB-DDPM nor V3 weights
+  are loaded or altered.
+- **Review:** generates 24 bilingual prompt PNGs with strict
+  silhouette metrics. `scripts.shape_first_review` compares shape
+  fidelity to the original known-good RGB DDPM while acknowledging
+  different latent/noise sampling schemes and never auto-releasing.
+
+Run tests before any training, then a short smoke pilot; details:
+[SHAPE_FIRST_V1.md](SHAPE_FIRST_V1.md).
+
+```bash
+python3 -m unittest discover -s tests -v
+# After tests pass:
+python3 -m scripts.shape_first train --mask-steps 40 --rgb-steps 30 \
+  --batch-size 12 --device cpu --cpu-threads 2 --log-every 10
+```
+
+The learned architecture remains **experimental** and may fail to
+produce attractive or even recognizable samples until trained
+properly. Unlike the old V3 approach, this is a distinct model
+trained from scratch; it has **not yet been run on the user's Mac**.
