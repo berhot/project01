@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 from scripts.pixel_diffusion import load_model
+from src.storage_paths import sora_run
 from src.pixel_shape_contrast import paired_prompt_probe
 
 
@@ -17,7 +18,7 @@ def main():
     parser.add_argument("--checkpoint",required=True)
     parser.add_argument("--pairs",type=int,default=8)
     parser.add_argument("--seed",type=int,default=42)
-    parser.add_argument("--output",required=True)
+    parser.add_argument("--output",default=None)
     parser.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     args=parser.parse_args()
     if args.pairs<1 or args.pairs>1000:
@@ -28,7 +29,7 @@ def main():
     result=paired_prompt_probe(model,seed=args.seed,pairs=args.pairs)
     result["checkpoint"]=str(args.checkpoint)
     result["architecture"]=model.config.architecture
-    out=Path(args.output)
+    out=Path(args.output) if args.output else sora_run("shape-probe")/"report.json"
     out.parent.mkdir(parents=True,exist_ok=True)
     with out.open("x",encoding="utf-8") as file:
         json.dump(result,file,indent=2,ensure_ascii=False)
