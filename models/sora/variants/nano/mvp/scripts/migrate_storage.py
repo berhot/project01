@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import tempfile
@@ -50,10 +51,13 @@ def migrate(source=None, destination=None, apply=False, run_ids=None):
     if not src.is_dir() or src.is_symlink():
         raise ValueError("Legacy source must be an ordinary directory")
     if run_ids is not None:
+        # Reject all slash and traversal characters, on macOS and Windows.
         run_ids=set(run_ids)
-        if not run_ids or any((not name or "/" in name or "\\\\" in name
-                               or name in (".","..") or name.startswith("."))
-                              for name in run_ids):
+        if not run_ids or any(
+            not isinstance(name,str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*",name) is None
+            for name in run_ids
+        ):
             raise ValueError("run_ids must be safe, nonempty run directory names")
     runs=[]
     for run in sorted(src.iterdir()):
