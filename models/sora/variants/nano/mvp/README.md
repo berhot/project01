@@ -1399,3 +1399,55 @@ trajectory**. If they fail even when starting from t20 despite
 near-perfect one-step recovery, investigate accumulated reverse
 steps and conditioning/guidance mismatch. No further multi-
 thousand-step CPU runs are justified before reviewing this result.
+
+
+## Central BERHOT model storage (default for all Sora Nano tools)
+
+**From this branch onward**, Sora training checkpoints, sample PNGs,
+evaluation grids, metrics and read-only audits save by default to:
+
+```text
+/Users/farisalsaiari/Desktop/BERHOT/storage/artifacts/sora/nano/mvp/
+```
+
+This is the same central company-wide structure used for BERHOT model-family
+artifacts, with each model's own subfolder. It works even when the terminal
+is inside `models/sora/variants/nano/mvp`, because paths are anchored to
+the repository root, not the current directory. Absolute path in the example
+is specific to the current Mac; other clones resolve automatically.
+
+**No new training is required to migrate earlier experiments.** Old Sora
+checkpoints remain at:
+
+```text
+models/sora/variants/nano/mvp/storage/artifacts/sora/nano/mvp/<run-id>/checkpoint.pt
+```
+
+Review the migration before copying:
+
+```bash
+python3 -m scripts.migrate_storage
+python3 -m scripts.migrate_storage --apply    # explicitly copy + verify
+```
+
+The command never moves, deletes or overwrites prior checkpoints. To check
+where the next new run would save **without launching training**, use:
+
+```bash
+python3 -c 'from src.storage_paths import sora_artifacts,sora_releases; print("artifacts:",sora_artifacts()); print("releases:",sora_releases())'
+```
+
+The `--output-root` option is a training-command **flag**, not a standalone
+shell command. You no longer need it for normal training. Similarly
+`--output-dir` and `--output` can be omitted from Sora CLI evaluation,
+sampling and audit commands to use fresh central artifact subdirectories.
+Explicit output overrides (`/tmp/...`, for example) still take priority.
+
+Central `storage/releases/sora/nano/<version>/` is reserved for a model
+package that has **passed evaluation and been explicitly approved**. The
+current experimental Sora model still fails triangle generation; no new
+release has been created, and the migration copies **artifacts only**.
+
+For future BERHOT model families, use the root-level helper
+`berhot_storage.paths`. See `docs/storage.md` for all family folders and
+release rules. Current Nabra and JSM storage is deliberately unchanged.
