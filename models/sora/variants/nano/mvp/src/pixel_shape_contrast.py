@@ -29,7 +29,10 @@ def matched_shape_batch(step, pairs, seed=42, split="train"):
     images,tokens,details=[],[],[]
     for i in range(pairs):
         color=colors[(step*3+i)%len(colors)]
-        language=("ar","en")[(step+i)%2]
+        # Rotate language INDEPENDENTLY of color parity across steps.
+        # Using (step+i)%2 here would confound colors with languages,
+        # because color index is (3*step+i)%4.
+        language=("en","ar")[((step//2)+i)%2]
         sample_seed=seed+step*5419+i*47
         pair=[]
         pair_tokens=[]
