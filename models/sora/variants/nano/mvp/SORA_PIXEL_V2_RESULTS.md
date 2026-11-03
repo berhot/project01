@@ -585,3 +585,78 @@ python3 -m scripts.pixel_conditioning_audit \
 correct-vs-swapped conditioning result explains which timestep,
 language or shape fails. The 32×32 synthetic model is not yet a
 general bilingual image generator.
+
+## 78 passing tests; ordinary diffusion conditioning audit (2026-11-03)
+
+User Mac: **78/78 tests passed**; then ran the same held-out 128-case
+ordinary-q(x_t|x0) audit on the 800-step baseline and teacher-preserved
+20-step model.
+
+| Comparison | Spatial baseline | Teacher-preserved |
+|---|---:|---:|
+| Correct square word wins (Arabic) | 87.50% | 84.38% |
+| Correct square word wins (English) | 84.38% | 81.25% |
+| Correct triangle word wins (Arabic) | 68.75% | 71.88% |
+| Correct triangle word wins (English) | 71.88% | 68.75% |
+
+The changes are small and not consistently better in either language.
+On the baseline, *across shapes combined*, correct prompt win rates
+by diffusion timestep were: t=5 **90.62%**, t=20 **90.62%**,
+t=50 **68.75%**, t=80 **62.50%**. Accuracy at high noise is weaker,
+but that alone does not explain triangle-only failures. The mean MSE
+advantage of the correct prompt is tiny (~0.00013–0.00063 across
+timesteps), so text conditioning is weak compared to RGB denoising.
+
+The training shapes were confirmed to be distinct: foreground
+bounding-box fill ratio was **1.000** for square versus **0.522**
+for triangle. Over the audited 120-step triangle-heavy curriculum,
+triangle EN/AR counts were equal at 360 each; old shapes were skewed
+(circle AR=120, EN=240; square AR=240, EN=120).
+This is not evidence that triangle targets are missing.
+
+Existing binary outcome remains unchanged: no generated triangles in
+any user-supplied 24-image gallery; 20-step candidate **not promoted**.
+
+### New *read-only* reverse trajectory experiment (code awaits Mac tests)
+
+The `scripts.pixel_reverse_trace` diagnostic traces the exact
+`posterior_mean` reverse diffusion from one *shared* initial Gaussian
+noise image for a square and triangle of the same color and language.
+At selected steps, it reports:
+- Pixel-level response of learned noise prediction to changing **only
+  the shape word** with the noisy RGB tensor held fixed
+- How the independent square and triangle reverse trajectories diverge
+- Predicted RGB `x0` foreground masks, square-vs-triangle IoU,
+  heuristic classes, and fraction of raw `x0` values requiring clipping
+- A side-by-side `reverse_trace.png` contact sheet of learned
+  intermediate RGB predictions, and independent final output PNGs
+
+Unlike the training dataset preview, these images are **model
+predictions**, NOT procedural PIL-drawn shapes. There is no
+training and no checkpoint writing.
+
+The trace duplicates the established mean posterior equations on
+purpose and includes regression tests to compare its final RGB tensors
+against the normal production `generate` function, so a diverging
+analysis implementation can be caught. Full tests have not yet run on
+the user's Mac; the new module must be validated before trusting it.
+
+Suggested first run:
+```bash
+python3 -m unittest discover -s tests -v
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+OUT="/tmp/sora-reverse-trace-$(date +%s)"
+python3 -m scripts.pixel_reverse_trace \
+  --checkpoint "$BASE" --color red --language en \
+  --seed 42 --guidance-scale 5 --cpu-threads 2 \
+  --output-dir "$OUT"
+open "$OUT/reverse_trace.png"
+```
+
+Inspect whether prompt-only noise response disappears at large
+timesteps, whether raw `x0` is dominated by clipping, and whether
+triangle and square masks converge despite different text. These
+measurements will decide whether the next research area is schedule/
+sampler dynamics, the word-conditioned noise network, or the
+data/geometry representation. **Do not start another 300/10000-step
+fine-tuning run on the existing objective.**
