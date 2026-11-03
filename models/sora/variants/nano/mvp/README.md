@@ -1451,3 +1451,9 @@ release has been created, and the migration copies **artifacts only**.
 For future BERHOT model families, use the root-level helper
 `berhot_storage.paths`. See `docs/storage.md` for all family folders and
 release rules. Current Nabra and JSM storage is deliberately unchanged.
+
+**Limited disk space:** prefer `python3 -m scripts.migrate_storage
+--run-id pixel-20261103T065647Z-ee054d71` to preview just the selected
+best older run, followed by the same command with `--apply` after review.
+`--run-id` can be repeated for additional runs. Original files are never
+deleted, and existing destination files are never overwritten.
