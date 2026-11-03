@@ -91,8 +91,10 @@ class PixelConfig:
     def __post_init__(self):
         if (self.image_size!=32 or self.max_tokens!=12 or self.channels<16
                 or self.channels%8 or self.text_dim<16 or self.diffusion_steps<8
-                or self.architecture!="rgb-unet-text-v1"
-                or self.dataset_version not in ("v1", "v2")):
+                or self.architecture not in ("rgb-unet-text-v1", "rgb-unet-spatial-text-v2")
+                or self.dataset_version not in ("v1", "v2")
+                or (self.architecture=="rgb-unet-spatial-text-v2"
+                    and self.dataset_version!="v2")):
             raise ValueError("Unsupported Sora pixel diffusion configuration")
 
 
@@ -126,6 +128,43 @@ class ResBlock(nn.Module):
         return (self.skip(x)+self.conv2(F.silu(h)))/math.sqrt(2)
 
 
+class SpatialTextAttention(nn.Module):
+    """Trainable per-pixel attention over individual prompt words.
+
+    Original pooled v1 text loses word identity. Attention lets RGB image
+    features attend to shape and color tokens at 32x32 and 16x16. A zero-
+    initialized output permits exact initial v1-denoiser weight transfer.
+    """
+    def __init__(self, channels, text_dim):
+        super().__init__()
+        self.query=nn.Conv2d(channels,channels,1)
+        self.key=nn.Linear(text_dim,channels)
+        self.value=nn.Linear(text_dim,channels)
+        self.output=nn.Conv2d(channels,channels,1)
+        nn.init.zeros_(self.output.weight)
+        nn.init.zeros_(self.output.bias)
+
+    def forward(self, features, tokens, encoder):
+        batch,channels,height,width=features.shape
+        mask=tokens.ne(0)
+        positions=torch.arange(tokens.shape[1],device=tokens.device)
+        words=encoder.token(tokens)+encoder.position(positions)[None,:,:]
+        words=words*mask[...,None]
+        queries=self.query(features).flatten(2).transpose(1,2)
+        keys=self.key(words)
+        values=self.value(words)
+        scores=torch.bmm(queries,keys.transpose(1,2)) / math.sqrt(channels)
+        scores=scores.masked_fill(~mask[:,None,:],-1e4)
+        weights=scores.softmax(dim=-1)
+        weighted=torch.bmm(weights,values).transpose(1,2).reshape(
+            batch,channels,height,width
+        )
+        delta=self.output(weighted)
+        # Empty/null CFG prompt cannot accidentally receive spatial text.
+        valid=mask.any(dim=1).float()[:,None,None,None]
+        return features+delta*valid
+
+
 class PixelDenoiser(nn.Module):
     def __init__(self,config=None):
         super().__init__()
@@ -141,6 +180,9 @@ class PixelDenoiser(nn.Module):
         self.mid=ResBlock(2*c,2*c,d)
         self.up32=ResBlock(3*c,c,d)
         self.output=nn.Sequential(nn.GroupNorm(8,c),nn.SiLU(),nn.Conv2d(c,3,3,padding=1))
+        if self.config.architecture=="rgb-unet-spatial-text-v2":
+            self.spatial32=SpatialTextAttention(c,d)
+            self.spatial16=SpatialTextAttention(2*c,d)
     def forward(self,noisy,timestep,tokens):
         if (noisy.ndim!=4 or noisy.shape[1:]!=(3,32,32)
                 or timestep.shape!=(len(noisy),) or tokens.shape!=(len(noisy),12)):
@@ -151,7 +193,11 @@ class PixelDenoiser(nn.Module):
                             torch.cos(time*frequencies[None]*1000)),dim=-1)
         context=self.context(self.text(tokens)+self.time(periodic))
         x32=self.block32(self.input(noisy),context)
+        if self.config.architecture=="rgb-unet-spatial-text-v2":
+            x32=self.spatial32(x32,tokens,self.text)
         x16=self.block16(self.down16(x32),context)
+        if self.config.architecture=="rgb-unet-spatial-text-v2":
+            x16=self.spatial16(x16,tokens,self.text)
         mid=self.mid(x16,context)
         merged=torch.cat((F.interpolate(mid,scale_factor=2,mode="nearest"),x32),dim=1)
         return self.output(self.up32(merged,context))
@@ -202,6 +248,46 @@ def training_loss(model,images,tokens,cfg_drop_prob=0.0):
     noisy=a.sqrt()*images+(1-a).sqrt()*eps
     conditioned, _ = apply_text_dropout(tokens, cfg_drop_prob)
     return F.mse_loss(model(noisy,times,conditioned),eps)
+
+
+def shape_aware_training_objective(model,images,tokens,cfg_drop_prob=0.15,
+                                   silhouette_weight=0.15):
+    """Experimental pixel-DDPM with an extra learned silhouette objective.
+
+    The model always predicts real RGB pixel noise, never a shape template.
+    For lower-noise timesteps, estimate x0 and compare the continuous RGB
+    saturation foreground against the observed TRAINING image. Gradients
+    flow through learned RGB denoising. Inference stays Gaussian -> pixels.
+    """
+    if model.config.architecture!="rgb-unet-spatial-text-v2":
+        raise ValueError("Shape objective requires the spatial-text architecture")
+    if not 0 <= silhouette_weight <= 2 or not math.isfinite(silhouette_weight):
+        raise ValueError("Invalid silhouette_weight")
+    if images.ndim!=4 or images.shape[1:]!=(3,32,32) or tokens.shape!=(len(images),12):
+        raise ValueError("Expected 32x32 RGB pixels and matching text tokens")
+    _,_,cumulative=noise_schedule(model.config,images.device)
+    times=torch.randint(0,model.config.diffusion_steps,(len(images),),
+                        device=images.device)
+    eps=torch.randn_like(images)
+    a=cumulative[times][:,None,None,None]
+    noisy=a.sqrt()*images+(1-a).sqrt()*eps
+    conditioned,_=apply_text_dropout(tokens,cfg_drop_prob)
+    predicted_eps=model(noisy,times,conditioned)
+    noise_mse=F.mse_loss(predicted_eps,eps)
+    reconstructed=((noisy-(1-a).sqrt()*predicted_eps)/a.sqrt()).clamp(-1.25,1.25)
+    reconstructed_saturation=reconstructed.amax(dim=1)-reconstructed.amin(dim=1)
+    true_saturation=images.amax(dim=1)-images.amin(dim=1)
+    soft_mask=torch.sigmoid((reconstructed_saturation-0.45)*8.0)
+    target_mask=(true_saturation>0.45).float()
+    intersection=(soft_mask*target_mask).sum(dim=(-1,-2))
+    foreground_sum=soft_mask.sum(dim=(-1,-2))+target_mask.sum(dim=(-1,-2))
+    dice_loss=1-(2*intersection+1)/(foreground_sum+1)
+    # x0 is less stable when alpha is very small: train mask only at t<=T/2.
+    valid=(times <= model.config.diffusion_steps//2).float()
+    silhouette_loss=(dice_loss*valid).sum()/valid.sum().clamp(min=1)
+    total=noise_mse+silhouette_weight*silhouette_loss
+    return {"total_loss":total,"noise_mse":noise_mse.detach(),
+            "silhouette_loss":silhouette_loss.detach()}
 
 
 @torch.no_grad()
