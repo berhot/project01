@@ -25,6 +25,7 @@ from src.pixel_dataset_v2 import (
     CONCEPTS as CONCEPTS_V2, caption_v2, balanced_training_batch,
 )
 from src.pixel_shape_contrast import matched_shape_batch, matched_shape_objective
+from src.pixel_preservation import preservation_objective
 
 PROMPTS = [
     ("red circle", "دائرة حمراء"), ("green circle", "دائرة خضراء"),
@@ -183,6 +184,8 @@ def train(args):
     paired_shape_weight = getattr(args,"paired_shape_weight",0.0)
     paired_shape_pairs = getattr(args,"paired_shape_pairs",4)
     paired_silhouette_weight = getattr(args,"paired_silhouette_weight",0.5)
+    preserve_weight = getattr(args,"preserve_weight",0.0)
+    preserve_null_weight = getattr(args,"preserve_null_weight",0.5)
     if conditioning not in ("pooled","spatial"):
         raise ValueError("conditioning must be pooled or spatial")
     if conditioning=="spatial" and args.dataset_version!="v2":
@@ -197,6 +200,15 @@ def train(args):
         raise ValueError("paired_shape_pairs must be positive")
     if paired_shape_weight > 0 and (conditioning!="spatial" or args.dataset_version!="v2"):
         raise ValueError("Matched counterfactual shape loss requires spatial v2 architecture")
+    if not 0 <= preserve_weight <= 10 or not np.isfinite(preserve_weight):
+        raise ValueError("preserve_weight must be finite in [0,10]")
+    if not 0 <= preserve_null_weight <= 2 or not np.isfinite(preserve_null_weight):
+        raise ValueError("preserve_null_weight must be finite in [0,2]")
+    if preserve_weight > 0 and (not init_v2 or conditioning!="spatial"
+                                or args.dataset_version!="v2"):
+        raise ValueError("Teacher preservation requires spatial v2 fine-tuning from --init-from-v2")
+    if preserve_weight > 0 and triangle_fraction is not None and triangle_fraction >= 1:
+        raise ValueError("Teacher preservation requires circle/square replay examples")
     if init_v1 and init_v2:
         raise ValueError("Cannot initialize from both v1 and v2")
     if triangle_fraction is not None and args.dataset_version != "v2":
@@ -219,6 +231,13 @@ def train(args):
         warm_start = initialize_v2_from_v2(model, init_v2)
     if warm_start is not None:
         print(json.dumps({"warm_start":warm_start},ensure_ascii=False),flush=True)
+    teacher=None
+    if preserve_weight > 0:
+        teacher=load_model(init_v2,args.device)
+        if teacher.config != cfg:
+            raise ValueError("Teacher checkpoint must have identical model configuration")
+        teacher.eval()
+        teacher.requires_grad_(False)
     optimizer=torch.optim.AdamW(model.parameters(),lr=args.learning_rate)
     run=Path(args.output_root)/(
         "pixel-"+time.strftime("%Y%m%dT%H%M%SZ",time.gmtime())+"-"+uuid.uuid4().hex[:8])
@@ -269,6 +288,17 @@ def train(args):
                 "paired_shape_difference_loss":round(float(pair_objectives["pair_difference_loss"]),6),
                 "paired_shape_loss":round(float(pair_objectives["pair_shape_loss"]),6),
             }
+        preserve_log=None
+        if preserve_weight > 0:
+            preserved=preservation_objective(
+                model,teacher,images,tokens,null_weight=preserve_null_weight
+            )
+            loss=loss+preserve_weight*preserved["total_loss"]
+            preserve_log={
+                "preserve_conditional_mse":round(float(preserved["conditional_loss"]),6),
+                "preserve_null_mse":round(float(preserved["null_loss"]),6),
+                "protected_old_shape_examples":preserved["protected_examples"],
+            }
         if not torch.isfinite(loss): raise FloatingPointError("Non-finite image diffusion loss")
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(),1)
@@ -280,6 +310,9 @@ def train(args):
                 report["total_loss"]=round(float(loss.detach()),6)
             if paired_log is not None:
                 report.update(paired_log)
+                report["total_loss"]=round(float(loss.detach()),6)
+            if preserve_log is not None:
+                report.update(preserve_log)
                 report["total_loss"]=round(float(loss.detach()),6)
             print(json.dumps(report),flush=True)
     path=run/"checkpoint.pt"
@@ -296,6 +329,9 @@ def train(args):
         "paired_silhouette_weight":(
             paired_silhouette_weight if paired_shape_weight>0 else None
         ),
+        "preserve_weight":preserve_weight,
+        "preserve_null_weight":preserve_null_weight if preserve_weight>0 else None,
+        "preserve_teacher_checkpoint":str(init_v2) if preserve_weight>0 else None,
         "model":{k:v.detach().cpu() for k,v in model.state_dict().items()},
         "seed":args.seed,"training_steps":args.steps,
         "training_distribution":(
@@ -394,6 +430,10 @@ def main():
                    help="Number of matched square/triangle pairs per step")
     t.add_argument("--paired-silhouette-weight",type=float,default=0.5,
                    help="Shape difference mask weight within paired objective")
+    t.add_argument("--preserve-weight",type=float,default=0.0,
+                   help="Optional frozen-source circle/square denoising preservation loss")
+    t.add_argument("--preserve-null-weight",type=float,default=0.5,
+                   help="Weight on teacher CFG null-prompt preservation")
     t.add_argument("--diffusion-steps",type=int,default=100)
     t.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     t.add_argument("--cpu-threads",type=int,default=2)
