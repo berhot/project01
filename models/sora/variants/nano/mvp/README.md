@@ -1527,3 +1527,33 @@ The learned architecture remains **experimental** and may fail to
 produce attractive or even recognizable samples until trained
 properly. Unlike the old V3 approach, this is a distinct model
 trained from scratch; it has **not yet been run on the user's Mac**.
+
+
+## Sora Shape Field V2 — separately versioned learned geometry + color (experimental)
+
+After the first shape-first mask-VAE pilot failed on all 24 generated RGB
+images, a read-only diagnosis isolated two independent issues:
+(1) Gaussian-prior mask generation was 6/8 circles but **0/8 squares,
+0/8 triangles**, with held-out mask reconstruction IoU only ~0.36–0.51;
+(2) the RGB network predicted the right color only 2/8 times per shape
+**even with the correct mask supplied**.
+
+The new `src/shape_field_v2.py` tests a separate approach:
+a **learned coordinate-conditioned neural occupancy field** driven by
+a learned Arabic/English shape word embedding and seeded Gaussian-sampled
+layout, followed by a **learned color-word neural foreground/background
+appearance model**. Neither uses polygon/ellipse drawing or hardcoded
+RGB color values at inference. Text conditioning recognizes only the
+explicitly supported small 32×32 synthetic v2 vocabulary.
+
+The `scripts/shape_field_v2.py` CLI creates distinct central artifact
+runs, saves independent weights and SHA256 checks, produces both
+24-panel generated-mask and RGB galleries, and prints separate
+mask geometry, RGB geometry and color correctness. It never overwrites
+previous model weights, trains automatically or publishes releases.
+
+**Do not assume the new approach fixes the failures before running
+its tests and viewing real generated images.** Follow
+[SHAPE_FIELD_V2.md](SHAPE_FIELD_V2.md) for the 132-test suite,
+80-step geometry/60-step color pilot, and strict comparison to the
+original RGB-DDPM baseline.
