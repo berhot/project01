@@ -1557,3 +1557,36 @@ its tests and viewing real generated images.** Follow
 [SHAPE_FIELD_V2.md](SHAPE_FIELD_V2.md) for the 132-test suite,
 80-step geometry/60-step color pilot, and strict comparison to the
 original RGB-DDPM baseline.
+
+
+## Shape Field V2.1 — paired same-layout bilingual shape supervision (not trained)
+
+The user's Shape Field V2 **132-test suite passed** on Mac. The
+80-step mask / 60-step RGB pilot improved shape-first V1 but still
+produced 8/8 correct circle masks, **0/8 squares and 0/8 triangles**.
+It scored 5/24 strict prompt success, with 87.5% color accuracy,
+and remains below the original RGB-DDPM overall strict accuracy.
+
+A separate, opt-in `--shape-v21` recipe was added to
+`scripts/shape_field_v2.py`. It trains true masks for all three
+shapes at the **same exact learned geometry layout**, in English
+and Arabic. A correct-vs-wrong shape-word ranking term explicitly
+tests whether the caption word changes mask geometry.
+
+The recommended mode clones original V2's learned mask and
+colorizer using `--init-from-v2`, uses a frozen teacher to
+preserve V2 circles, and keeps the working colorizer unchanged
+with `--color-steps 0`. A separate run prefix
+`shape-field-v21-...` is used, and original source files are
+never overwritten.
+
+Before training, run the read-only
+`python3 -m scripts.shape_field_word_audit` on the existing V2
+checkpoint; it measures foreground IoU for changed shape words
+under identical layout and colors, and writes a new central
+diagnostic report. The new tests have NOT yet been run on the
+user's Mac. **No improvement or release is claimed**.
+
+See [SHAPE_FIELD_V21.md](SHAPE_FIELD_V21.md) for the 140-test
+validation, word sensitivity audit, safeguarded 40-step pilot,
+and strict post-training comparison.
