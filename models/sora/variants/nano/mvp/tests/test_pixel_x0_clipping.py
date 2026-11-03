@@ -109,5 +109,7 @@ class X0ClippingTests(unittest.TestCase):
             del obj["x0_clipping"]
             old.write_text(json.dumps(obj))
             result=compare_reports(old,candidate/"report.json")
-            self.assertTrue(result["circles_preserved"] if "circles_preserved" in result else True)
-            self.assertTrue("accepted_by_toy_gate" in result)
+            self.assertIn("accepted_by_toy_gate",result)
+            self.assertIn("checks",result)
+            self.assertTrue(result["checks"]["circles_preserved"])
+            self.assertTrue(result["checks"]["squares_preserved"])
