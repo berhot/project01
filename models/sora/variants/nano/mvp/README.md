@@ -799,3 +799,38 @@ Results should be inspected visually for triangles, along with
 the next meaningful experiment is training-time **shape
 discrimination** with a controlled paired-caption objective,
 not a blind increase in steps or sampling guidance.
+
+### Recommended controlled sampler comparison (same model, same initial noise)
+
+Rather than comparing a new shared-noise score directly with the old
+per-class-seeded score, run **both** samplers under the same new
+evaluation protocol:
+
+```bash
+CKPT="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+MEAN="/tmp/sora-mean-shared-$(date +%s)"
+ANCESTRAL="/tmp/sora-ancestral-shared-$(date +%s)"
+
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$CKPT" --sampler posterior_mean \
+  --guidance-scales 5 --seeds 42 --shared-noise --output-dir "$MEAN"
+
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$CKPT" --sampler ancestral \
+  --guidance-scales 5 --seeds 42 --shared-noise --output-dir "$ANCESTRAL"
+
+open "$MEAN/guidance_5_seed_42/preview_grid.png"
+open "$ANCESTRAL/guidance_5_seed_42/preview_grid.png"
+
+python3 -m scripts.pixel_diagnose \
+  --evaluation-dir "$ANCESTRAL" \
+  --output "$ANCESTRAL/shape_audit.json"
+```
+
+The diagnostic additionally reports per-color/English/Arabic
+**square-vs-triangle foreground mask intersection-over-union** (IoU)
+when the same initial noise was used: IoU near 1.0 means the
+silhouettes are nearly identical, regardless of changed shape words.
+A lower IoU indicates different silhouettes but not necessarily a
+correct triangle; the preview and label metrics remain essential.
+This is a model-sampling experiment, **not training or a guarantee**.
