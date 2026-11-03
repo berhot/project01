@@ -121,15 +121,47 @@ def synthetic_example_v2(seed, color=None, shape=None, language=None,
     return image_tensor, tokenize_v2(prompt), prompt, (color, shape)
 
 
-def balanced_training_batch(step, batch_size, seed=42):
-    """Round-robin 12 classes; over multiples of 12 exactly balanced."""
+def shape_curriculum(step, batch_size, triangle_fraction):
+    """Return concept labels, emphasizing triangles while retaining old shapes.
+
+    This is a training-only curriculum; sampling is always full RGB diffusion.
+    Vary color rotation by step so every shape gets every color over time.
+    """
     if step < 1 or batch_size < 1:
         raise ValueError("Invalid step or batch size")
-    # Use changing class offsets for small (non-multiple of 12) batches too.
-    offset = (step - 1) * batch_size
+    if not isinstance(triangle_fraction, (int, float)) or not 0 <= triangle_fraction <= 1:
+        raise ValueError("triangle_fraction must lie between 0 and 1")
+    triangle_count = int(batch_size * triangle_fraction + 0.5)
+    old_count = batch_size - triangle_count
+    circle_count = old_count // 2 + (old_count % 2 if step % 2 else 0)
+    square_count = old_count - circle_count
+    counts = (("circle", circle_count),("square", square_count),
+              ("triangle", triangle_count))
+    labels = []
+    colors = tuple(COLORS)
+    for shape_index,(shape,count) in enumerate(counts):
+        for index in range(count):
+            color = colors[(step + index + shape_index * 2) % len(colors)]
+            labels.append((color,shape))
+    # Rotating the ordering avoids a persistent shape-to-batch-slot pattern.
+    rotation = step % len(labels)
+    return labels[rotation:] + labels[:rotation]
+
+
+def balanced_training_batch(step, batch_size, seed=42, triangle_fraction=None):
+    """Old balanced v2 training by default; opt-in triangle-heavy curriculum."""
+    if step < 1 or batch_size < 1:
+        raise ValueError("Invalid step or batch size")
+    if triangle_fraction is None:
+        offset = (step - 1) * batch_size
+        labels = [
+            CONCEPTS[(offset + index) % len(CONCEPTS)]
+            for index in range(batch_size)
+        ]
+    else:
+        labels = shape_curriculum(step, batch_size, triangle_fraction)
     images, tokens = [], []
-    for index in range(batch_size):
-        color, shape = CONCEPTS[(offset + index) % len(CONCEPTS)]
+    for index,(color,shape) in enumerate(labels):
         language = "ar" if ((step + index) % 2) else "en"
         image, token, _, _ = synthetic_example_v2(
             seed + step * 4099 + index * 13, color=color, shape=shape,
