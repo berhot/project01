@@ -17,7 +17,9 @@ import torch
 from torch.nn import functional as F
 
 from scripts.pixel_diffusion import load_model
-from src.pixel_dataset_v2 import COLORS, caption_v2, synthetic_example_v2, tokenize_v2
+from src.pixel_dataset_v2 import (
+    COLORS, caption_v2, synthetic_example_v2, tokenize_v2, shape_curriculum,
+)
 from src.pixel_diffusion import noise_schedule
 
 
@@ -49,6 +51,20 @@ def validation_items(seeds=(42,123)):
                         "foreground_fill":round(fill,5),
                     })
     return items
+
+
+def curriculum_exposure(steps=120,batch_size=12,triangle_fraction=0.5):
+    """Count original optional training mix labels without training the model."""
+    if steps<1 or batch_size<1:
+        raise ValueError("steps and batch_size must be positive")
+    counts={}
+    for step in range(1,steps+1):
+        labels=shape_curriculum(step,batch_size,triangle_fraction)
+        for index,(color,shape) in enumerate(labels):
+            language="ar" if (step+index)%2 else "en"
+            key=f"{shape}_{language}"
+            counts[key]=counts.get(key,0)+1
+    return {k:counts[k] for k in sorted(counts)}
 
 
 @torch.no_grad()
@@ -125,6 +141,7 @@ def conditioning_audit(model,seeds=(42,123),timesteps=(5,20,50,80)):
         "by_timestep":{str(t):summarize([
             r for r in results if r["timestep"]==t
         ]) for t in timesteps},
+        "training_curriculum_exposure_120_steps":curriculum_exposure(),
         "validation_foreground_fill":{
             shape:round(sum(x["foreground_fill"] for x in items
                             if x["shape"]==shape)/sum(x["shape"]==shape
@@ -157,6 +174,7 @@ def main():
         "shape_language":report["by_shape_language"],
         "by_timestep":report["by_timestep"],
         "foreground_fill":report["validation_foreground_fill"],
+        "training_curriculum_exposure_120_steps":report["training_curriculum_exposure_120_steps"],
     },indent=2,ensure_ascii=False))
 
 
