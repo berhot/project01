@@ -95,7 +95,15 @@ class PartialReverseAuditTests(unittest.TestCase):
         self.assertFalse(torch.equal(noisy[0],noisy[2]))
 
     def test_near_clean_start_preserves_reference_geometry(self):
-        model=self.model()
+        # Use the production 100-step schedule. An 8-step cosine schedule
+        # has substantial noise even at t=0; it would make this an
+        # unreliable image-quality assertion for randomly initialized
+        # model weights, not a reverse-sampler regression test.
+        torch.manual_seed(8)
+        model=PixelDenoiser(PixelConfig(
+            channels=16,diffusion_steps=100,dataset_version="v2",
+            architecture="rgb-unet-spatial-text-v2",
+        ))
         audit,_=partial_reverse_audit(
             model,seeds=(42,),colors=("red",),
             start_timesteps=(0,),guidance_scale=1.0
