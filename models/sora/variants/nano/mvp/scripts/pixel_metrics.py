@@ -58,7 +58,7 @@ def main():
     parser.add_argument("--guidance-scales", type=float, nargs="+",
                         default=[1.0,3.0,5.0,7.5])
     parser.add_argument("--seeds", type=int, nargs="+", default=[42])
-    parser.add_argument("--sampler", choices=("posterior_mean","ddim"),
+    parser.add_argument("--sampler", choices=("posterior_mean","ancestral","ddim"),
                         default="posterior_mean")
     parser.add_argument("--sample-steps", type=int, default=None)
     parser.add_argument("--device", choices=("cpu","mps","cuda"), default="cpu")
