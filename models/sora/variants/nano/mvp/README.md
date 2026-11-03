@@ -1100,3 +1100,61 @@ python3 -m scripts.pixel_quality_gate \
 remains zero, and process exit code 2 by design. No more
 training is indicated until the triangle data/representation
 failure is better understood.
+
+### Read-only ordinary DDPM triangle-conditioning audit — next research gate
+
+The user confirmed **74/74 tests passed**, and the quality gate
+correctly rejected the teacher-preserved 20-step candidate: circle,
+square, and color were still 100%, but triangle accuracy remained **0%**.
+No additional training is justified from those results.
+
+The latest investigation adds
+`scripts.pixel_conditioning_audit` to test the denoiser's response
+on NORMAL forward diffusion q(x_t|x0), not the specially constructed
+midpoint x_t used by the paired auxiliary loss. For actual held-out
+square/triangle images, it reuses the same noisy RGB input and epsilon
+target, and compares MSE for the **correct** shape word against the
+**wrong** shape word in both languages. Timesteps 5, 20, 50, 80 and
+seeds 42/123 give 128 comparisons; the script records correct-prompt
+win rate, MSE advantage, and prompt-response RMS by shape, language
+and timestep.
+
+It also audits the actual target masks and the original optional
+50%-triangle curriculum's 120-step language exposure. Triangles are
+proper 3-vertex training-image polygons and have equal aggregate
+EN/AR representation. The original curriculum nevertheless assigns
+circles EN:AR = 2:1 and squares EN:AR = 1:2. The diagnostic does not
+change that old training distribution or rewrite model weights.
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+SAFE="storage/artifacts/sora/nano/mvp/pixel-20261103T131058Z-65110681/checkpoint.pt"
+test -f "$BASE" && test -f "$SAFE" || { echo "Missing checkpoint"; false; }
+
+python3 -m scripts.pixel_conditioning_audit \
+  --checkpoint "$BASE" --seeds 42 123 --timesteps 5 20 50 80 \
+  --output /tmp/sora-shape-conditioning-base-v2.json
+
+python3 -m scripts.pixel_conditioning_audit \
+  --checkpoint "$SAFE" --seeds 42 123 --timesteps 5 20 50 80 \
+  --output /tmp/sora-shape-conditioning-safe20-v2.json
+```
+
+This must remain **read-only**. A positive MSE advantage for correct
+shape text suggests the model uses that information on a real
+forward-noised validation image. It is NOT proof of triangular
+generations; a negative advantage or low win rate is useful evidence
+of poor conditioning. Compare both saved reports on identical samples.
+If the ordinary q(x_t) probe is adequate but sampled triangles
+still fail, investigate error accumulation through the reverse
+trajectory or the representation/size distribution rather than
+blindly adding more training steps.
+
+New tests are committed but have **not been run on the Mac**.
+The earlier 800-step spatial checkpoint remains the best toy baseline.
