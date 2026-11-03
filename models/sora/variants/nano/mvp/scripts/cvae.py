@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw
 import torch
 
 from src.model import CAPTIONS, caption_id
+from src.storage_paths import sora_run
 from src.cvae import CVAEConfig, ShapeCVAE, batch_from_synthetic, cvae_loss, generate, save_rgb_png
 
 
@@ -39,9 +40,7 @@ def train(args):
     config = CVAEConfig(channels=args.channels, latent_dim=args.latent_dim, beta=args.beta)
     model = ShapeCVAE(config).to(args.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    run = Path(args.output_root) / (
-        "cvae-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + uuid.uuid4().hex[:8]
-    )
+    run = sora_run("cvae",getattr(args,"output_root",None))
     run.mkdir(parents=True, exist_ok=False)
     for step in range(1, args.steps + 1):
         labels = torch.randint(0, len(CAPTIONS), (args.batch_size,), device="cpu")
@@ -112,7 +111,8 @@ def main():
     training.add_argument("--latent-dim", type=int, default=8)
     training.add_argument("--beta", type=float, default=0.05)
     training.add_argument("--device", choices=("cpu", "mps", "cuda"), default="cpu")
-    training.add_argument("--output-root", default="storage/artifacts/sora/nano/mvp")
+    training.add_argument("--output-root", default=None,
+                          help="Default: BERHOT/storage/artifacts/sora/nano/mvp")
     sampling = sub.add_parser("sample")
     sampling.add_argument("--checkpoint", required=True)
     sampling.add_argument("--prompt", required=True)
