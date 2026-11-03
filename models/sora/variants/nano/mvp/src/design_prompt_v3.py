@@ -39,12 +39,12 @@ SHAPE_WORDS = {
 }
 CORNER_MODIFIERS = {
     0.25: ("slightly rounded", "small rounded", "slightly rounded corners", "small rounded corners", "rounded a little",
-           "زوايا دائرية صغيرة", "زوايا مستديرة صغيرة", "حواف دائرية صغيرة"),
+           "زوايا دائرية صغيرة", "زوايا مستديرة صغيرة", "حواف دائرية صغيرة", "بزوايا دائرية صغيرة"),
     0.5: ("rounded corners", "rounded square", "زوايا دائرية", "زوايا مستديرة",
-          "حواف مستديرة", "حواف دائرية"),
+          "حواف مستديرة", "حواف دائرية", "بزوايا دائرية", "بزوايا مستديرة"),
     0.75: ("very rounded", "large rounded", "heavily rounded",
            "large radius", "large rounded corners", "very rounded corners", "square with large rounded corners", "زوايا دائرية كبيرة", "زوايا مستديرة كبيرة",
-           "حواف مستديرة كبيرة", "حواف دائرية كبيرة"),
+           "حواف مستديرة كبيرة", "حواف دائرية كبيرة", "بزوايا دائرية كبيرة", "بزوايا مستديرة كبيرة"),
 }
 FILLER = ("create", "make", "draw", "generate", "design", "please",
           "a", "an", "the", "with", "and", "for", "me", "of",
