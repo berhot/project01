@@ -345,7 +345,7 @@ def train(args):
     return path
 
 
-def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mean",guidance_scale=1.0,shared_noise=False):
+def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mean",guidance_scale=1.0,shared_noise=False,x0_clipping="fixed"):
     require_guidance_training(model, guidance_scale)
     version = model.config.dataset_version
     prompts = PROMPTS if version=="v1" else [
@@ -364,7 +364,7 @@ def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mea
     for j,(english,arabic) in enumerate(prompts):
         for lang_index,prompt in enumerate((english,arabic)):
             sample_seed=seed if shared_noise else seed+j
-            image=generate(model,prompt,seed=sample_seed,device=device,steps=sample_steps,sampler=sampler,guidance_scale=guidance_scale)
+            image=generate(model,prompt,seed=sample_seed,device=device,steps=sample_steps,sampler=sampler,guidance_scale=guidance_scale,x0_clipping=x0_clipping)
             name=english.replace(" ","_")+("_en.png" if lang_index==0 else "_ar.png")
             save_image(image,path/name)
             thumbnail=Image.open(path/name).resize((32*scale,32*scale),Image.Resampling.NEAREST)
@@ -393,6 +393,7 @@ def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mea
         "training_data":"synthetic; no photorealistic or open-domain data",
         "image_pixels_generated_by_diffusion":True,
         "sampler":sampler,"sample_steps":sample_steps,
+        "x0_clipping":x0_clipping,
         "shared_noise_across_concepts":bool(shared_noise),
         "guidance_scale":guidance_scale,
         "checkpoint_cfg_drop_prob":getattr(model, "cfg_drop_prob", 0.0),
@@ -446,6 +447,8 @@ def main():
     e.add_argument("--sample-steps",type=int,default=None)
     e.add_argument("--sampler",choices=("posterior_mean","ancestral","ddim"),default="posterior_mean")
     e.add_argument("--guidance-scale",type=float,default=1.0)
+    e.add_argument("--x0-clipping",choices=("fixed","dynamic"),default="fixed",
+                   help="Inference-only x0 clipping policy; fixed preserves existing behavior")
     e.add_argument("--shared-noise",action="store_true",help="Use identical initial noise for every concept and language")
     e.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     s=sub.add_parser("sample")
@@ -456,15 +459,16 @@ def main():
     s.add_argument("--sample-steps",type=int,default=None)
     s.add_argument("--sampler",choices=("posterior_mean","ancestral","ddim"),default="posterior_mean")
     s.add_argument("--guidance-scale",type=float,default=1.0)
+    s.add_argument("--x0-clipping",choices=("fixed","dynamic"),default="fixed")
     s.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     args=p.parse_args()
     if args.action=="train": train(args)
     elif args.action=="evaluate":
-        evaluate(load_model(args.checkpoint,args.device),args.output_dir,args.seed,args.sample_steps,sampler=args.sampler,guidance_scale=args.guidance_scale,shared_noise=args.shared_noise)
+        evaluate(load_model(args.checkpoint,args.device),args.output_dir,args.seed,args.sample_steps,sampler=args.sampler,guidance_scale=args.guidance_scale,shared_noise=args.shared_noise,x0_clipping=args.x0_clipping)
     else:
         model=load_model(args.checkpoint,args.device)
         require_guidance_training(model, args.guidance_scale)
-        save_image(generate(model,args.prompt,args.seed,args.device,args.sample_steps,sampler=args.sampler,guidance_scale=args.guidance_scale),args.output)
+        save_image(generate(model,args.prompt,args.seed,args.device,args.sample_steps,sampler=args.sampler,guidance_scale=args.guidance_scale,x0_clipping=args.x0_clipping),args.output)
         print(json.dumps({"output":args.output,"prompt":args.prompt},ensure_ascii=False))
 
 if __name__=="__main__": main()
