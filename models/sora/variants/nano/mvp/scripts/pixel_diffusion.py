@@ -26,6 +26,7 @@ from src.pixel_dataset_v2 import (
 )
 from src.pixel_shape_contrast import matched_shape_batch, matched_shape_objective
 from src.pixel_preservation import preservation_objective
+from src.storage_paths import sora_run
 
 PROMPTS = [
     ("red circle", "دائرة حمراء"), ("green circle", "دائرة خضراء"),
@@ -239,8 +240,7 @@ def train(args):
         teacher.eval()
         teacher.requires_grad_(False)
     optimizer=torch.optim.AdamW(model.parameters(),lr=args.learning_rate)
-    run=Path(args.output_root)/(
-        "pixel-"+time.strftime("%Y%m%dT%H%M%SZ",time.gmtime())+"-"+uuid.uuid4().hex[:8])
+    run=sora_run("pixel",getattr(args,"output_root",None))
     run.mkdir(parents=True,exist_ok=False)
     for step in range(1,args.steps+1):
         if cfg.dataset_version == "v2":
@@ -439,7 +439,8 @@ def main():
     t.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     t.add_argument("--cpu-threads",type=int,default=2)
     t.add_argument("--log-every",type=int,default=100)
-    t.add_argument("--output-root",default="storage/artifacts/sora/nano/mvp")
+    t.add_argument("--output-root",default=None,
+                   help="Optional override; default is BERHOT/storage/artifacts/sora/nano/mvp")
     e=sub.add_parser("evaluate")
     e.add_argument("--checkpoint",required=True)
     e.add_argument("--output-dir",required=True)
