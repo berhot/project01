@@ -1063,3 +1063,40 @@ distribution/objective instead of increasing the run length.
 
 This model remains an experimental 32×32, 12-class synthetic RGB
 diffusion MVP, not open-domain Arabic/English image generation.
+
+### 20-step teacher-preserved result and quality-gate legacy fix
+
+The user finished the 20-step test and supplied the actual CFG-5
+generated image sheet: **all circles and squares remained correct,
+but all triangle prompts are still blocks**. The new candidate
+`pixel-20261103T131058Z-65110681/checkpoint.pt` matched the good
+800-step spatial-v2 baseline on the 12-class toy benchmark: colors
+100%, circles 100%, squares 100%, triangles **0%**, strict prompt
+accuracy 66.67%. This is **not** a triangle-generating model.
+
+The initial quality gate raised
+`ValueError: Cannot compare different shared_noise_across_concepts`
+because an earlier baseline report omitted the field introduced
+later. Legacy reports used independent seed-per-prompt noise, so the
+gate now interprets an omitted field as `false`; it still rejects
+explicit shared-noise `true` versus `false`, wrong seeds, or
+different guidance/sampler settings. Existing saved reports can be
+compared directly without regenerating images:
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -p 'test_pixel_quality_gate.py' -v
+
+python3 -m scripts.pixel_quality_gate \
+  --baseline-report /tmp/sora-spatial-eval-1793689086/guidance_5_seed_42/report.json \
+  --candidate-report /tmp/sora-safe20-eval-1793711582/guidance_5_seed_42/report.json
+```
+
+**Expected:** gate decision JSON with
+`"accepted_by_toy_gate": false` because triangle accuracy
+remains zero, and process exit code 2 by design. No more
+training is indicated until the triangle data/representation
+failure is better understood.
