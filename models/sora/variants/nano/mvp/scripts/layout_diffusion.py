@@ -17,6 +17,7 @@ import torch
 from src.layout_diffusion import LayoutConfig, LayoutDenoiser, sample_layout, training_loss
 from src.spatial_field import SpatialConfig, SpatialField
 from src.model import CAPTIONS
+from src.storage_paths import sora_run
 
 
 def restore_prior(path, device="cpu"):
@@ -63,10 +64,7 @@ def train(args):
     cfg = LayoutConfig(steps=args.diffusion_steps, hidden=args.hidden)
     model = LayoutDenoiser(cfg).to(args.device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
-    output = Path(args.output_root) / (
-        "layout-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-        + "-" + uuid.uuid4().hex[:8]
-    )
+    output = sora_run("layout",getattr(args,"output_root",None))
     output.mkdir(parents=True, exist_ok=False)
     for step in range(1, args.steps + 1):
         labels = torch.randint(0, len(CAPTIONS), (args.batch_size,), device=args.device)
@@ -149,7 +147,8 @@ def main():
     training.add_argument("--hidden", type=int, default=64)
     training.add_argument("--device", choices=("cpu", "mps", "cuda"), default="cpu")
     training.add_argument("--cpu-threads", type=int, default=2)
-    training.add_argument("--output-root", default="storage/artifacts/sora/nano/mvp")
+    training.add_argument("--output-root", default=None,
+                          help="Default: BERHOT/storage/artifacts/sora/nano/mvp")
     evaluation = sub.add_parser("evaluate")
     evaluation.add_argument("--layout-checkpoint", required=True)
     evaluation.add_argument("--spatial-checkpoint", required=True)
