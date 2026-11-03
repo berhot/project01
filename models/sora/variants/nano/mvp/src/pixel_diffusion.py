@@ -317,7 +317,9 @@ def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mea
     beta,alpha,cum=noise_schedule(model.config,device)
     model.eval()
     if sampler in ("posterior_mean","ancestral"):
-        for t in range(total-1,-1):
+        # IMPORTANT: descending range needs a NEGATIVE step. Without -1
+        # this loop is empty and the sampler returns clipped initial noise.
+        for t in range(total-1,-1,-1):
             eps=guided_noise(model,x,torch.tensor([t],device=device,dtype=torch.long),tokens,guidance_scale)
             a=cum[t]
             x0=((x-(1-a).sqrt()*eps)/a.sqrt()).clamp(-1,1)
