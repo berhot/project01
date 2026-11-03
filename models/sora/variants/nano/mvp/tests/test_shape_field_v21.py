@@ -77,12 +77,27 @@ class ShapeFieldV21Tests(unittest.TestCase):
         self.assertTrue(torch.isfinite(results["loss"]))
         self.assertGreater(float(results["reconstruction_loss"]),0)
         self.assertGreaterEqual(float(results["shape_rank_loss"]),0)
+        # Crucial Arabic regression: circle/square/triangle can have
+        # different adjective gender ("صفراء" vs "أصفر"). Counterfactual
+        # MUST change exactly one shape token, never the color adjective.
+        wrong=results["wrong_tokens"]
         self.assertTrue(torch.equal(
-            keyword_ids(results["wrong_tokens"],COLOR_WORDS),
+            keyword_ids(wrong,COLOR_WORDS),
             keyword_ids(tokens,COLOR_WORDS)))
         self.assertTrue(torch.all(
-            keyword_ids(results["wrong_tokens"],SHAPE_WORDS)!=
+            keyword_ids(wrong,SHAPE_WORDS)!=
             keyword_ids(tokens,SHAPE_WORDS)
+        ))
+        self.assertTrue(torch.all((wrong!=tokens).sum(dim=1)==1))
+        self.assertTrue(torch.equal(
+            torch.where(
+                tokens==keyword_ids(tokens,SHAPE_WORDS)[:,None],
+                torch.zeros_like(tokens),tokens
+            ),
+            torch.where(
+                wrong==keyword_ids(wrong,SHAPE_WORDS)[:,None],
+                torch.zeros_like(wrong),wrong
+            )
         ))
         results["loss"].backward()
         self.assertGreater(float(mask_model.shape_words.weight.grad.abs().sum()),0)
