@@ -834,3 +834,90 @@ silhouettes are nearly identical, regardless of changed shape words.
 A lower IoU indicates different silhouettes but not necessarily a
 correct triangle; the preview and label metrics remain essential.
 This is a model-sampling experiment, **not training or a guarantee**.
+
+## Triangle geometry failure: same-noise contrastive diagnostic
+
+**Confirmed:** Original v2 pooled model, triangle-heavy fine-tune,
+spatial text attention, silhouette loss, and stochastic ancestral
+sampling **all failed** to generate any recognizable triangles.
+The latest same-initial-noise trial with the 800-step spatial
+checkpoint produced 66.67% strict prompt accuracy using
+`posterior_mean` but only 41.67% using `ancestral`.
+Both had **zero triangle accuracy**. See
+`SORA_PIXEL_V2_RESULTS.md`.
+
+A new opt-in research experiment creates paired square/triangle
+training targets using the SAME color, location, background, size
+and language. Both paired prompts are denoised from the SAME
+moderately noisy RGB image, and a counterfactual supervision
+term forces a shape-dependent predicted noise correction.
+An additional difference-of-silhouettes loss upweights the
+triangle cutout corners. This is **only training supervision**.
+The image-generation path still uses learned RGB diffusion,
+not procedural drawing.
+
+New files:
+- `src/pixel_shape_contrast.py`: deterministic paired-data,
+  shared-noise targets, differentiable shape loss and read-only probe
+- `scripts/pixel_shape_probe.py`: inspect an existing checkpoint's
+  response when square/triangle prompts receive identical noisy pixels
+- `tests/test_pixel_shape_contrast.py`: mathematical target,
+  determinism, EN/AR coverage, gradients, checkpoint preservation,
+  and short CLI fine-tuning tests
+
+### First: inspect the current weights, without training
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+
+python3 -m unittest discover -s tests -v
+
+CKPT="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+test -f "$CKPT" || { echo "Spatial checkpoint missing"; false; }
+
+OUT="/tmp/sora-shape-probe-$(date +%s).json"
+python3 -m scripts.pixel_shape_probe \
+  --checkpoint "$CKPT" \
+  --pairs 8 --seed 42 --output "$OUT"
+cat "$OUT"
+```
+
+A small `prompt_difference_ratio` suggests weak sensitivity to
+shape terms under the paired/noisy probe. `shape_difference_alignment`
+measures whether the *direction* of the response matches the target
+correction. High sensitivity or alignment alone **does not prove**
+triangle generation; the 24-image grid remains the real acceptance test.
+
+### Next: bounded 50-step integration experiment (only after tests pass)
+
+```bash
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+
+python3 -m scripts.pixel_diffusion train \
+  --dataset-version v2 --conditioning spatial \
+  --init-from-v2 "$BASE" \
+  --triangle-fraction 0.50 \
+  --paired-shape-weight 0.35 --paired-shape-pairs 4 \
+  --paired-silhouette-weight 0.50 \
+  --silhouette-weight 0.15 \
+  --steps 50 --batch-size 12 --base-channels 32 \
+  --diffusion-steps 100 --cfg-drop-prob 0.15 \
+  --learning-rate 0.00005 --device cpu --cpu-threads 2
+```
+
+The standard denoising objective is retained. Logs add
+`paired_shape_noise_mse`, `paired_shape_difference_loss`,
+`paired_shape_loss`, and total loss. The new checkpoint has
+a unique path, records its parent and the training weights,
+and does not overwrite or modify the source.
+
+This is **not proven to fix triangles** and shouldn't automatically
+be extended to thousands of CPU training steps. First compare the
+probe and inspect the same eight successful circle/square classes
+for regressions. If the short test works, consider a bounded
+300-step trial with explicit evaluation and a maximum runtime budget.
+Keep PR #10 in draft. The Sora visual workflow remains
+`workflow_dispatch` manual-only to avoid notification flooding.
