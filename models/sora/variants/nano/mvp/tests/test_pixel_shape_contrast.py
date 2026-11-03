@@ -96,6 +96,24 @@ class ShapeContrastTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             matched_shape_objective(model,images,tokens,silhouette_weight=-1)
 
+    def test_probe_balances_all_four_colors_in_both_languages(self):
+        model=self.make_model()
+        result=paired_prompt_probe(model,seed=42,pairs=8)
+        self.assertEqual(
+            result["probe_protocol"],"matched-v2-multistep-language-balanced"
+        )
+        self.assertEqual(result["pairs"],8)
+        self.assertEqual(
+            result["per_color_language_counts"],
+            {f"{color}_{lang}":1
+             for color in ("red","green","blue","yellow")
+             for lang in ("ar","en")}
+        )
+        self.assertEqual(len(result["pair_details"]),8)
+        self.assertEqual(
+            result,paired_prompt_probe(model,seed=42,pairs=8)
+        )
+
     def test_new_run_from_spatial_checkpoint_preserves_original(self):
         torch.manual_seed(7)
         model=self.make_model()
