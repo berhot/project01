@@ -309,3 +309,18 @@ gate and has **not** been packaged as a production release. A directory marker
 in the repository is not evidence that a release exists. Both
 `storage/artifacts/` and `storage/releases/` are Git-ignored, except
 for optional `.gitkeep` markers. Do not automatically sync to R2.
+
+### Space-efficient selective migration
+
+On a storage-limited laptop, copying all historical experiments is often
+unnecessary. Use `--run-id` (repeatable) to copy only selected verified runs,
+without touching earlier failed checkpoints:
+
+```bash
+python3 -m scripts.migrate_storage --run-id pixel-20261103T065647Z-ee054d71
+python3 -m scripts.migrate_storage --apply --run-id pixel-20261103T065647Z-ee054d71
+```
+
+The run ID shown is the existing best 800-step Sora spatial-v2 experiment
+from the user's previous local tests. The command is an example, not an
+automatic release approval. The legacy source stays intact.
