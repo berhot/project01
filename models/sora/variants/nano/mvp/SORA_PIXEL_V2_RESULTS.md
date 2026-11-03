@@ -198,3 +198,78 @@ same-dataset 800-step experiment (LR 0.00005) from the original 2,500-step
 warm-start checkpoint. Only undertake it if all automated tests pass.
 
 This is a research hypothesis, not a fix already shown to work.
+
+## Spatial text + silhouette 800-step trial: still zero triangles
+
+Reported by user on 2026-11-03 after successful 800-step spatial
+architecture training from the original 2,500-step v2 base:
+
+- Checkpoint (Mac only; never commit):
+  `storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt`
+- New model: `rgb-unet-spatial-text-v2`, 32 channels, 100 diffusion
+  timesteps, 50% triangle training examples, silhouette Dice weight 0.15,
+  CFG dropout 0.15, learning rate 0.00005.
+- **CFG 5.0** on seeds 42/123: color 100%, shape 66.67%,
+  strict prompt 66.67%, bilingual both correct 66.67%.
+- Per-shape diagnostic: **circle 100%, square 100%, triangle 0%**.
+  Per-concept: all four triangle colors have 0% prompt accuracy.
+- **CFG 7.5**: color 95.83%, shape 58.33%, strict prompt
+  54.17%; triangle remains 0%.
+- Actual 24-image CFG 5.0 preview shows eight correctly colored
+  circles/squares and four colors of rectangle-like objects for
+  triangle requests, in both Arabic and English.
+- Noise MSE at final step 0.010998; silhouette training Dice loss
+  0.081245; these cannot establish generative shape accuracy.
+
+**Conclusion:** New spatial token attention + silhouette loss slightly
+improved overall toy accuracy but **did not teach triangles**. This
+isolates the persistent category failure under the current evaluation
+and deterministic posterior-mean sampling. Keep the new model as
+an experimental checkpoint, not a successful foundation release.
+
+### No-retraining test of a sampling hypothesis
+
+Previous evaluations used `posterior_mean`, which uses only the
+reverse DDPM mean and **omits** Gaussian posterior variance.
+This is a deterministic heuristic, not a full DDPM sample.
+The experimental `--sampler ancestral` adds that stochastic variance
+at all 100 reverse steps using a seeded torch.Generator; `ddim`
+remains an alternative and the old sampler is unchanged.
+
+The new `--shared-noise` flag also forces the **same starting Gaussian
+noise** across all 12 English/Arabic prompts (the old benchmark
+used a different seed for each class). Thus a change from
+`blue square` to `blue triangle` can be compared directly,
+rather than confounded with a different initial noise image.
+This is a NEW comparison protocol; do not directly equate its
+score with the old seed+class benchmark.
+
+Run only after local tests pass:
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+CKPT="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+test -f "$CKPT" || { echo "Missing spatial checkpoint"; false; }
+OUT="/tmp/sora-ancestral-shared-$(date +%s)"
+
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$CKPT" --sampler ancestral \
+  --guidance-scales 5 --seeds 42 --shared-noise \
+  --output-dir "$OUT"
+
+open "$OUT/guidance_5_seed_42/preview_grid.png"
+python3 -m scripts.pixel_diagnose \
+  --evaluation-dir "$OUT" \
+  --output "$OUT/ancestral_diagnosis.json"
+```
+
+If ancestral DDPM still fails to produce visually recognizable
+triangles, stop sampler tweaking and design a genuinely
+shape-discriminative denoising objective / training ablation
+before another long GPU or CPU run. A sampler change alone is
+not proof that learned shape semantics exist.
