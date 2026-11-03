@@ -155,3 +155,54 @@ class ShapeFieldV21Tests(unittest.TestCase):
             self.assertEqual(manifest["training_recipe"],"original-v2")
             self.assertIsNone(manifest["paired_shape_objective"])
             self.assertFalse(audit_words(run)["release_approved"])
+
+    def test_v21_warmstarts_from_original_v2_without_mutating_source(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            baseline_args=self.recipe(root/"baseline")
+            baseline_args.shape_v21=False
+            baseline=train(baseline_args)
+            files=(baseline/"mask_field.pt",baseline/"colorizer.pt",
+                   baseline/"run.json")
+            hashes={file.name:hashlib.sha256(file.read_bytes()).hexdigest()
+                    for file in files}
+            candidate_args=self.recipe(root/"candidate")
+            candidate_args.init_from_v2=str(baseline)
+            candidate_args.circle_preserve_weight=0.2
+            candidate_args.color_steps=0
+            candidate=train(candidate_args)
+            record=json.loads((candidate/"run.json").read_text())
+            self.assertEqual(record["warm_start"]["source_run_dir"],
+                             str(baseline))
+            self.assertTrue(record["colorizer_reused_untrained"])
+            self.assertEqual(record["circle_teacher_weight"],0.2)
+            self.assertEqual(candidate.name.startswith("shape-field-v21-"),True)
+            base_field,base_color,_=load_run(baseline)
+            new_field,new_color,_=load_run(candidate)
+            for name,base_param in base_color.state_dict().items():
+                self.assertTrue(torch.equal(base_param,new_color.state_dict()[name]))
+            self.assertEqual(
+                hashes,{file.name:hashlib.sha256(file.read_bytes()).hexdigest()
+                        for file in files})
+
+    def test_v21_bad_warmstart_rejected_before_creating_run(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            baseline_args=self.recipe(root/"old")
+            baseline_args.shape_v21=False
+            baseline=train(baseline_args)
+            args=self.recipe(root/"candidate")
+            args.init_from_v2=str(baseline)
+            args.hidden=32
+            with self.assertRaisesRegex(ValueError,"matching original"):
+                train(args)
+            self.assertFalse((root/"candidate").exists())
+            args=self.recipe(root/"candidate")
+            args.init_from_v2=str(baseline)
+            args.shape_v21=False
+            with self.assertRaisesRegex(ValueError,"requires explicit"):
+                train(args)
+            args=self.recipe(root/"candidate")
+            args.color_steps=0
+            with self.assertRaisesRegex(ValueError,"Skipping color"):
+                train(args)
