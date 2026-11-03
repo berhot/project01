@@ -81,3 +81,71 @@ The previous v1 six-class pilot reached 91.67% strict heuristic
 prompt accuracy at CFG 7.5 on two seeds, but v1/v2 have different
 numbers of classes and must not be compared as an equal-difficulty
 benchmark.
+
+## New controlled experiment: v1→v2 warm-start (2026-11-03)
+
+User-reported Mac outcome for **2,500-step v2 fine-tuning**, initialized
+from the earlier **10,000-step v1 six-class RGB checkpoint**.
+
+- Source v1 checkpoint:
+  `storage/artifacts/sora/nano/mvp/pixel-20261102T230751Z-185cee42/checkpoint.pt`
+- New model checkpoint (saved locally; **not committed**):
+  `storage/artifacts/sora/nano/mvp/pixel-20261103T004620Z-c92b5c0b/checkpoint.pt`
+- Configuration: v2 12 classes, base channels 32, 100 diffusion steps,
+  batch 12, CFG dropout 0.15, LR 0.0001, CPU 2 threads
+- Transfer: v1 RGB denoiser + original word embeddings; newly introduced
+  v2 words initialized from old learned embeddings and fine-tuned
+- Last logged training noise MSE: **0.009091**
+- Evaluated with same v2 12-class toy heuristic; 24 model-generated
+  images × two seeds (42 and 123) × four guidance scales
+- Full tests on user's Mac before warm-start: **41 passed**
+- **No warm-start image grid attached yet for human review**
+
+### Direct v2-to-v2 comparison (guidance scale 7.5)
+
+| Metric | From-scratch 10,000 steps | Warm-start 2,500 steps |
+|---|---:|---:|
+| Color accuracy | 58.33% | **95.83%** |
+| Shape accuracy | 41.67% | **58.33%** |
+| Strict prompt accuracy | 25.00% | **58.33%** |
+| Both English and Arabic correct | 25.00% | **58.33%** |
+| EN/AR prediction agreement | 91.67% | 91.67% |
+
+Scores above are the same percentages on both random seeds for
+guidance scale 7.5. Prompt accuracy rose from 6/24 to 14/24;
+both-language-correct concepts rose from 3/12 to 7/12 per seed.
+
+**Improvement is supported, but the causal contribution of transfer
+alone cannot be isolated:** the two runs also differed in learning rate,
+number of steps, and training initialization. We need a matched
+ablation to claim exact transfer benefit.
+
+At guidance 5.0, warm-start strict prompt accuracy was 58.33%
+for both seeds; at guidance 3.0 it was 37.5% and 50.0%; at
+guidance 1.0 only 8.33%. In v2, shape accuracy of 58.33% is now
+the major bottleneck; better color control cannot compensate for
+wrong circles/squares/triangles. All scores remain *toy heuristics*.
+
+### Next no-retrain diagnosis
+
+Pull the updated diagnostics and inspect actual PNGs:
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+python3 -m scripts.pixel_diagnose \
+  --evaluation-dir /tmp/sora-v2-warmstart-1793667091 \
+  --output /tmp/sora-v2-warmstart-shape-audit.json
+open /tmp/sora-v2-warmstart-1793667091/guidance_7p5_seed_42/preview_grid.png
+```
+
+New diagnostic fields `shape_accuracy_by_expected_shape`,
+`prompt_accuracy_by_expected_shape`, and
+`prompt_accuracy_by_concept` will distinguish a triangle-only
+failure from broad shape collapse. **Stop before another long run**
+and determine which geometry is failing. The tool only reads
+already-generated PNGs/reports, not model weights.
