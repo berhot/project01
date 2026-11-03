@@ -33,6 +33,11 @@ def audit_evaluation(report_path):
     classes=defaultdict(lambda: {"count":0,"correct":0,"en":None,"ar":None})
     color_count=Counter()
     shape_count=Counter()
+    shape_totals=Counter()
+    shape_correct=Counter()
+    shape_prompt_correct=Counter()
+    class_totals=Counter()
+    class_prompt_correct=Counter()
     for item in items:
         filename=item["image"]
         if not filename.endswith(("_en.png","_ar.png")):
@@ -53,6 +58,12 @@ def audit_evaluation(report_path):
             raise ValueError("Duplicate image for same language/concept/seed")
         rgb=image_rgb(report_path.parent/filename)
         correct=pred_color==expected_color and pred_shape==expected_shape
+        shape_totals[expected_shape] += 1
+        shape_correct[expected_shape] += int(pred_shape==expected_shape)
+        shape_prompt_correct[expected_shape] += int(correct)
+        class_key=f"{expected_color} {expected_shape}"
+        class_totals[class_key] += 1
+        class_prompt_correct[class_key] += int(correct)
         slot[language]={"color":pred_color,"shape":pred_shape,"correct":correct,
                         "image":filename,"pixels":rgb}
         slot["count"]+=1
@@ -96,6 +107,18 @@ def audit_evaluation(report_path):
         },
         "expected_to_predicted_shape":{
             f"{a} -> {b}":n for (a,b),n in sorted(shape_count.items())
+        },
+        "shape_accuracy_by_expected_shape":{
+            shape:round(shape_correct[shape]/shape_totals[shape],4)
+            for shape in sorted(shape_totals)
+        },
+        "prompt_accuracy_by_expected_shape":{
+            shape:round(shape_prompt_correct[shape]/shape_totals[shape],4)
+            for shape in sorted(shape_totals)
+        },
+        "prompt_accuracy_by_concept":{
+            concept:round(class_prompt_correct[concept]/class_totals[concept],4)
+            for concept in sorted(class_totals)
         },
         "bilingual_pairs":len(classes),
         "bilingual_heuristic_agreement":round(same_prediction_different_prompts/len(classes),4),
@@ -154,6 +177,9 @@ def main():
             "dominant_fraction":r["dominant_prediction_fraction"],
             "bilingual_agree_but_both_wrong":r["bilingual_agree_but_both_wrong"],
             "bilingual_pixel_mae":r["mean_bilingual_pixel_difference"],
+            "shape_accuracy":r["shape_accuracy_by_expected_shape"],
+            "prompt_by_shape":r["prompt_accuracy_by_expected_shape"],
+            "prompt_by_concept":r["prompt_accuracy_by_concept"],
         } for r in audit["results"]],
         "saved_diagnostic":args.output,
     },ensure_ascii=False,indent=2))
