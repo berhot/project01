@@ -12,7 +12,8 @@ from scripts.pixel_diffusion import evaluate, load_model, require_guidance_train
 
 
 def compare(model, output_dir, scales=(1.0,3.0,5.0,7.5), seeds=(42,),
-            sampler="posterior_mean", sample_steps=None, shared_noise=False):
+            sampler="posterior_mean", sample_steps=None, shared_noise=False,
+            x0_clipping="fixed"):
     if not scales or not seeds:
         raise ValueError("Need at least one scale and seed")
     if len(set(scales)) != len(scales) or len(set(seeds)) != len(seeds):
@@ -31,7 +32,7 @@ def compare(model, output_dir, scales=(1.0,3.0,5.0,7.5), seeds=(42,),
             result = evaluate(
                 model, directory, seed=seed, sampler=sampler,
                 sample_steps=sample_steps, guidance_scale=float(scale),
-                shared_noise=shared_noise,
+                shared_noise=shared_noise,x0_clipping=x0_clipping,
             )
             results.append({
                 "guidance_scale":float(scale), "seed":int(seed),
@@ -45,6 +46,7 @@ def compare(model, output_dir, scales=(1.0,3.0,5.0,7.5), seeds=(42,),
         "checkpoint_cfg_drop_prob":getattr(model,"cfg_drop_prob",0.0),
         "shared_noise_across_concepts":bool(shared_noise),
         "sampler":sampler,
+        "x0_clipping":x0_clipping,
         "results":results,
     }
     (root / "summary.json").write_text(
@@ -64,6 +66,8 @@ def main():
     parser.add_argument("--sampler", choices=("posterior_mean","ancestral","ddim"),
                         default="posterior_mean")
     parser.add_argument("--sample-steps", type=int, default=None)
+    parser.add_argument("--x0-clipping",choices=("fixed","dynamic"),default="fixed",
+                        help="Inference-only clipping ablation; fixed is historical default")
     parser.add_argument("--shared-noise", action="store_true",
                         help="Use the same starting Gaussian noise for all prompts")
     parser.add_argument("--device", choices=("cpu","mps","cuda"), default="cpu")
@@ -71,7 +75,7 @@ def main():
     model = load_model(args.checkpoint, args.device)
     summary = compare(
         model,args.output_dir,args.guidance_scales,args.seeds,
-        args.sampler,args.sample_steps,args.shared_noise,
+        args.sampler,args.sample_steps,args.shared_noise,args.x0_clipping,
     )
     print(json.dumps({
         "summary":str(Path(args.output_dir) / "summary.json"),
