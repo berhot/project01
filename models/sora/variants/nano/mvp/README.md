@@ -921,3 +921,55 @@ for regressions. If the short test works, consider a bounded
 300-step trial with explicit evaluation and a maximum runtime budget.
 Keep PR #10 in draft. The Sora visual workflow remains
 `workflow_dispatch` manual-only to avoid notification flooding.
+
+### Paired-loss 50-step result: validate before any more training
+
+The user passed **62 tests** and completed the opt-in **50-step**
+paired square/triangle run from the spatial-v2 800-step checkpoint.
+The new local checkpoint is
+`storage/artifacts/sora/nano/mvp/pixel-20261103T124924Z-b7835e13/checkpoint.pt`.
+Paired shape-difference loss was 0.369545 at step 1 and 0.148050
+at step 50, **on different training batches**. We have not yet
+measured held-out prompt sensitivity or generated-image quality.
+
+The initial probe reported predicted/expected shape-noise response
+0.09417 and cosine alignment −0.0587, but its eight pairs assigned
+only one language to each color. The updated probe fixes this by
+covering every color in both languages; it labels its new protocol
+`matched-v2-multistep-language-balanced`. Compare both checkpoints
+using that protocol, not to the unbalanced initial score.
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+NEW="storage/artifacts/sora/nano/mvp/pixel-20261103T124924Z-b7835e13/checkpoint.pt"
+test -f "$BASE" && test -f "$NEW" || { echo "Missing checkpoint"; false; }
+
+python3 -m scripts.pixel_shape_probe \
+  --checkpoint "$BASE" --pairs 8 --seed 42 \
+  --output "/tmp/sora-shape-base-balanced-42.json"
+python3 -m scripts.pixel_shape_probe \
+  --checkpoint "$NEW" --pairs 8 --seed 42 \
+  --output "/tmp/sora-shape-finetuned-balanced-42.json"
+
+OUT="/tmp/sora-paired-50-eval-$(date +%s)"
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$NEW" --sampler posterior_mean \
+  --guidance-scales 5 --seeds 42 \
+  --output-dir "$OUT"
+open "$OUT/guidance_5_seed_42/preview_grid.png"
+python3 -m scripts.pixel_diagnose \
+  --evaluation-dir "$OUT" --output "$OUT/shape_audit.json"
+```
+
+This uses **no retraining**, no checkpoint modification, and the
+same RGB diffusion sampler protocol as the earlier 800-step spatial
+benchmark. It will answer whether a short paired run improved the
+predicted shape response and, more importantly, whether recognizable
+triangles appear in the 24 generated images. Do not extend to 300+
+steps without comparing the new images and per-shape breakdown.
