@@ -228,3 +228,100 @@ python3 -m unittest discover -s tests -v
 Only after all **140 tests pass**, proceed with the read-only
 shape-word audit. The V2.1 training pilot remains experimental
 and has **not** been launched.
+
+
+## 2026-11-03 V2.1 real image evaluation: NO IMPROVEMENT
+
+The user's Mac executed the V2.1 40-step matched-layout,
+circle-teacher-preserved geometry-only pilot, saving:
+
+`storage/artifacts/sora/nano/mvp/shape-field-v21-20261103T213049Z-4a6aa3a3/`
+
+Read-only shape-word audit:
+`shape-word-audit-20261103T213144Z-1507f980/report.json`
+
+24 actual generated RGB and learned-mask outputs:
+`shape-field-v2-eval-20261103T213145Z-9ebb626f/`
+
+Head-to-head with original V2 at the same seed 42:
+
+| Metric | Original V2 | V2.1 |
+| --- | ---: | ---: |
+| Circle mask strict geometry | 8/8 | 8/8 |
+| Square mask strict geometry | 0/8 | 0/8 |
+| Triangle mask strict geometry | 0/8 | 0/8 |
+| Circle mean expected-mask IoU | **0.94727** | 0.93898 |
+| Square mean expected-mask IoU | 0.78626 | 0.79045 |
+| Triangle mean expected-mask IoU | 0.53740 | 0.54419 |
+| Color accuracy | 0.875 | 0.875 |
+| Final strict prompt accuracy | 0.2083 | 0.2083 |
+
+Same-layout shape-word mask overlaps decreased a little:
+circle/square 0.77904 → 0.76997, circle/triangle
+0.75269 → 0.72772, square/triangle 0.58694 → 0.55986.
+The model is sensitive to changed shape words, but this
+40-step pilot **did not learn recognizable squares or triangles**.
+
+**Disposition:** V2.1 is preserved as a failed pilot, not
+approved for promotion or longer training. No previous weights
+were replaced. The original 800-step RGB-DDPM remains the
+highest overall strict prompt scoring baseline.
+
+### New read-only next diagnostic: held-out versus sampled layout
+
+Rather than guessing that more training will solve the problem,
+`python3 -m scripts.shape_field_geometry_diagnose` uses BOTH
+existing saved original V2 and V2.1 checkpoints and a matched
+24-example held-out validation split.
+
+For each color/shape/language, it evaluates:
+
+1. Neural mask prediction on the exact observed bbox of an
+   unseen validation mask. The mask is used ONLY for evaluation.
+   Report true pixel IoU vs target and BCE.
+2. Neural mask prediction on a seeded Gaussian-sampled layout,
+   **without any target image**.
+3. Fixed binarization threshold sensitivity (0.4, 0.5, 0.6).
+   These are diagnostic threshold variants, **not permission
+   to pick the best test threshold to inflate the release gate**.
+4. Per-shape changes of V2.1 relative to V2, using the
+   *same* held-out examples and seed 42.
+
+Run AFTER syncing GitHub and passing **144 tests**
+(previous 140 plus four new geometry-diagnostic tests):
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git fetch origin feat/image-nano-foundation-mvp-20261102
+git merge --ff-only FETCH_HEAD
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+BASE="/Users/farisalsaiari/Desktop/BERHOT/storage/artifacts/sora/nano/mvp/shape-field-v2-20261103T211035Z-39d9b863"
+NEW="/Users/farisalsaiari/Desktop/BERHOT/storage/artifacts/sora/nano/mvp/shape-field-v21-20261103T213049Z-4a6aa3a3"
+
+python3 -m scripts.shape_field_geometry_diagnose \
+  --baseline-run-dir "$BASE" \
+  --run-dir "$NEW" \
+  --seed 42 --device cpu
+```
+
+- If held-out **true-layout mask IoU is also poor**, the
+  shape field itself remains underfit or its conditioning
+  is inadequate. The next experiment should focus on
+  class-specific boundary learning instead of merely
+  changing layout sampling.
+- If held-out IoU is strong but sampled prior shapes are
+  bad, target the sampled layout distribution / geometry
+  normalization discrepancy.
+- If only threshold changes strongly affect geometry,
+  inspect probability calibration and thresholding, then
+  validate a fixed threshold on independent seeds.
+- Preserve source checkpoints, never auto-train, never
+  write to `storage/releases/sora` before actual
+  successful image and human visual evaluation.
+
+The new diagnostic and its four tests are committed,
+but **have not yet run on the user's Mac**. This is a
+research diagnosis only, not a new model checkpoint.
