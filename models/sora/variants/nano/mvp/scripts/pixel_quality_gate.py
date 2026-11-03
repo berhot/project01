@@ -33,6 +33,16 @@ def compare_reports(baseline_report,candidate_report,
     if (not isinstance(before_shared,bool) or not isinstance(after_shared,bool)
             or before_shared!=after_shared):
         raise ValueError("Cannot compare different shared_noise_across_concepts")
+    # Legacy reports always used the historical fixed x0 clipping.
+    # Different clipping policies are distinct sampling protocols:
+    # inspect their metrics side by side, but do not use the candidate
+    # model-promotion gate to claim a like-for-like comparison.
+    original_clip=before.get("x0_clipping","fixed")
+    new_clip=after.get("x0_clipping","fixed")
+    if (original_clip not in ("fixed","dynamic")
+            or new_clip not in ("fixed","dynamic")
+            or original_clip!=new_clip):
+        raise ValueError("Cannot gate runs with different x0_clipping policies")
     def signatures(doc):
         return sorted((item["image"],item["language"],item["seed"])
                       for item in doc["items"])
