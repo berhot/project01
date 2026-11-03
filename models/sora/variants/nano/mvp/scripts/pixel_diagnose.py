@@ -9,6 +9,7 @@ import argparse
 from collections import Counter, defaultdict
 import json
 from pathlib import Path
+from src.storage_paths import sora_run
 
 import numpy as np
 from PIL import Image
@@ -207,7 +208,8 @@ def main():
     parser.add_argument("--evaluation-dir",required=True)
     parser.add_argument("--output",default=None)
     args=parser.parse_args()
-    audit=analyze_directory(args.evaluation_dir,args.output)
+    output=args.output or str(sora_run("pixel-diagnose")/"report.json")
+    audit=analyze_directory(args.evaluation_dir,output)
     print(json.dumps({
         "evaluation_dir":args.evaluation_dir,
         "summary":[{
@@ -223,7 +225,7 @@ def main():
             "prompt_by_concept":r["prompt_accuracy_by_concept"],
             "same_noise_square_triangle_mask_iou":r["mean_square_triangle_mask_iou"],
         } for r in audit["results"]],
-        "saved_diagnostic":args.output,
+        "saved_diagnostic":output,
     },ensure_ascii=False,indent=2))
 
 
