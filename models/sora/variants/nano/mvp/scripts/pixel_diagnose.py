@@ -91,6 +91,40 @@ def audit_evaluation(report_path):
             "agree_but_both_wrong":bool(agree and not en["correct"] and not ar["correct"]),
             "english_arabic_mean_absolute_pixel_difference":round(diff,6),
         })
+    square_triangle_comparisons=[]
+    if report.get("shared_noise_across_concepts") and version=="v2":
+        # Contrast images made with EXACTLY the same initial Gaussian noise,
+        # same color, same language; only the shape word changes.
+        colors=sorted({color for color,_,_ in classes})
+        seeds=sorted({seed for _,_,seed in classes})
+        for color in colors:
+            for seed in seeds:
+                square=classes[(color,"square",seed)]
+                triangle=classes[(color,"triangle",seed)]
+                for language in ("en","ar"):
+                    square_rgb=square[language]["pixels"]
+                    triangle_rgb=triangle[language]["pixels"]
+                    square_mask=(
+                        square_rgb.max(axis=-1)-square_rgb.min(axis=-1)>0.2
+                    )
+                    triangle_mask=(
+                        triangle_rgb.max(axis=-1)-triangle_rgb.min(axis=-1)>0.2
+                    )
+                    intersection=int(np.logical_and(square_mask,triangle_mask).sum())
+                    union=int(np.logical_or(square_mask,triangle_mask).sum())
+                    square_triangle_comparisons.append({
+                        "color":color,"language":language,"seed":seed,
+                        "square_triangle_pixel_mae":round(float(
+                            np.abs(square_rgb-triangle_rgb).mean()
+                        ),6),
+                        "square_triangle_mask_iou":round(
+                            intersection/union if union else 1.0,6
+                        ),
+                        "square_mask_area":int(square_mask.sum()),
+                        "triangle_mask_area":int(triangle_mask.sum()),
+                        "square_predicted_shape":square[language]["shape"],
+                        "triangle_predicted_shape":triangle[language]["shape"],
+                    })
     major,count=predictions.most_common(1)[0]
     return {
         "dataset_version":version,
@@ -125,6 +159,13 @@ def audit_evaluation(report_path):
         "bilingual_agree_but_both_wrong":agreement_but_both_wrong,
         "mean_bilingual_pixel_difference":round(float(np.mean(pair_differences)),6),
         "pairs":examples,
+        "shared_noise_across_concepts":bool(report.get("shared_noise_across_concepts",False)),
+        "square_triangle_same_noise_comparison":square_triangle_comparisons,
+        "mean_square_triangle_mask_iou":(
+            round(float(np.mean([
+                row["square_triangle_mask_iou"] for row in square_triangle_comparisons
+            ])),6) if square_triangle_comparisons else None
+        ),
         "original_metrics":report.get("metrics"),
     }
 
@@ -180,6 +221,7 @@ def main():
             "shape_accuracy":r["shape_accuracy_by_expected_shape"],
             "prompt_by_shape":r["prompt_accuracy_by_expected_shape"],
             "prompt_by_concept":r["prompt_accuracy_by_concept"],
+            "same_noise_square_triangle_mask_iou":r["mean_square_triangle_mask_iou"],
         } for r in audit["results"]],
         "saved_diagnostic":args.output,
     },ensure_ascii=False,indent=2))
