@@ -6,7 +6,9 @@ from pathlib import Path
 import torch
 
 from src.pixel_diffusion import PixelConfig, PixelDenoiser
-from scripts.pixel_conditioning_audit import validation_items, conditioning_audit
+from scripts.pixel_conditioning_audit import (
+    validation_items, conditioning_audit, curriculum_exposure,
+)
 
 
 class PixelConditioningAuditTests(unittest.TestCase):
@@ -67,6 +69,15 @@ class PixelConditioningAuditTests(unittest.TestCase):
             first["validation_foreground_fill"]["square"],
             first["validation_foreground_fill"]["triangle"],
         )
+
+    def test_triangle_heavy_curriculum_exposure_and_language_imbalance(self):
+        coverage=curriculum_exposure(steps=120,batch_size=12)
+        self.assertEqual(coverage,{
+            "circle_ar":120,"circle_en":240,
+            "square_ar":240,"square_en":120,
+            "triangle_ar":360,"triangle_en":360,
+        })
+        self.assertEqual(sum(coverage.values()),1440)
 
     def test_refuses_invalid_timestep_and_non_v2_checkpoint(self):
         v1=PixelDenoiser(PixelConfig(channels=16,diffusion_steps=8))
