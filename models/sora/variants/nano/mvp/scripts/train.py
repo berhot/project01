@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 from src.model import Config, Denoiser, CAPTIONS, synthetic_image, training_loss, sample, save_png
+from src.storage_paths import sora_run
 
 
 def main():
@@ -22,7 +23,8 @@ def main():
     p.add_argument("--channels", type=int, default=32)
     p.add_argument("--diffusion-steps", type=int, default=50)
     p.add_argument("--device", choices=("cpu", "mps", "cuda"), default="cpu")
-    p.add_argument("--output-root", default="storage/artifacts/sora/nano/mvp")
+    p.add_argument("--output-root", default=None,
+                   help="Default: BERHOT/storage/artifacts/sora/nano/mvp")
     args = p.parse_args()
     if args.steps < 1 or args.batch_size < 1 or args.learning_rate <= 0:
         p.error("Invalid training settings")
@@ -33,7 +35,7 @@ def main():
     device = torch.device(args.device)
     model = Denoiser(config).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
-    run = Path(args.output_root) / ("image-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + uuid.uuid4().hex[:8])
+    run = sora_run("image", args.output_root)
     run.mkdir(parents=True, exist_ok=False)
     for step in range(1, args.steps + 1):
         ids = [(step * args.batch_size + j) % len(CAPTIONS) for j in range(args.batch_size)]
