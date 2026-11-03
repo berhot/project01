@@ -25,8 +25,9 @@ class AncestralSamplerTests(unittest.TestCase):
         original_guided=guided_noise
         expected_timesteps=list(range(config.diffusion_steps-1,-1,-1))
 
-        with patch("src.pixel_diffusion.torch.randn", wraps=original_randn) as rng, (
-            patch("src.pixel_diffusion.guided_noise", wraps=original_guided) as predict
+        with (
+            patch("src.pixel_diffusion.torch.randn", wraps=original_randn) as rng,
+            patch("src.pixel_diffusion.guided_noise", wraps=original_guided) as predict,
         ):
             a=generate(model,"مثلث أصفر",seed=42,device="cpu",
                        sampler="ancestral",guidance_scale=3.0)
@@ -47,8 +48,9 @@ class AncestralSamplerTests(unittest.TestCase):
         self.assertEqual(a.shape,(3,32,32))
         self.assertTrue(torch.isfinite(a).all())
 
-        with patch("src.pixel_diffusion.torch.randn", wraps=original_randn) as rng, (
-            patch("src.pixel_diffusion.guided_noise", wraps=original_guided) as predict
+        with (
+            patch("src.pixel_diffusion.torch.randn", wraps=original_randn) as rng,
+            patch("src.pixel_diffusion.guided_noise", wraps=original_guided) as predict,
         ):
             deterministic=generate(model,"مثلث أصفر",seed=42,device="cpu",
                                    sampler="posterior_mean",guidance_scale=3.0)
