@@ -24,6 +24,7 @@ from src.pixel_dataset_v2 import COLORS,SHAPES,balanced_training_batch,caption_v
 from src.pixel_diffusion import save_image,vocabulary_for
 from src.pixel_metrics import summarize,analyze_image
 from src.pixel_shape_quality import score_model_sample
+from scripts.shape_first_diagnose import score_binary_mask
 from src.shape_field_v2 import (
     ShapeFieldConfig,NeuralMaskField,NeuralColorizer,
     geometry_objective,color_objective,generate
@@ -234,6 +235,7 @@ def evaluate(run_dir,seed=42,output_dir=None,device="cpu"):
                 save_image(rgb,dest/filename)
                 _save_learned_mask(mask,masks/filename)
                 metric=score_model_sample(rgb,color,shape)
+                mask_metric=score_binary_mask(mask,shape)
                 legacy=analyze_image(rgb,dataset_version="v2")
                 predictions.append({
                     "expected_color":color,"expected_shape":shape,
@@ -246,6 +248,7 @@ def evaluate(run_dir,seed=42,output_dir=None,device="cpu"):
                     "language":language,"seed":shared_seed,
                     "expected_shape":shape,"expected_color":color,
                     "strict_geometry":metric,
+                    "learned_mask_geometry":mask_metric,
                     "learned_mask":f"learned_masks/{filename}"
                 })
                 row=shape_index*2+lang_index
@@ -263,6 +266,10 @@ def evaluate(run_dir,seed=42,output_dir=None,device="cpu"):
     quality={
         shape:{
             "images":8,
+            "learned_mask_pass_count":sum(
+                row["learned_mask_geometry"]["strict_geometry_pass"] for row in items
+                if row["expected_shape"]==shape
+            ),
             "geometry_pass_count":sum(
                 row["strict_geometry"]["qualified_geometry"] for row in items
                 if row["expected_shape"]==shape
