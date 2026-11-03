@@ -50,6 +50,14 @@ class PixelDiagnoseTests(unittest.TestCase):
             self.assertEqual(report["bilingual_heuristic_agreement"],1.0)
             self.assertEqual(report["mean_bilingual_pixel_difference"],0.0)
             self.assertEqual(len(report["pairs"]),12)
+            self.assertEqual(report["shape_accuracy_by_expected_shape"],{
+                "circle":1.0,"square":0.0,"triangle":0.0,
+            })
+            self.assertEqual(report["prompt_accuracy_by_expected_shape"],{
+                "circle":0.25,"square":0.0,"triangle":0.0,
+            })
+            self.assertEqual(report["prompt_accuracy_by_concept"]["red circle"],1.0)
+            self.assertEqual(report["prompt_accuracy_by_concept"]["yellow triangle"],0.0)
 
     def test_root_analysis_rejects_output_overwrite(self):
         with tempfile.TemporaryDirectory() as tmp:
