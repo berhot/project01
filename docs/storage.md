@@ -223,3 +223,89 @@ give it a separate remote prefix or bucket and let it manage its content-address
 objects. Do not upload this folder hierarchy into DVC's internal cache namespace
 or manipulate that namespace manually. Git tracks the DVC metadata; DVC manages
 the payload versions. DVC has not been initialized by this scaffold.
+
+
+## Company-wide canonical output paths (Sora integrated)
+
+**Recommendation:** one BERHOT `storage/` root with separate, isolated
+subtrees **for each model family**. A family does not have its own nested
+`models/<family>/.../storage/` directory. Store architectures/configurations
+and source code in `models/`; keep trained weights, previews, logs and reports
+in central `storage/`.
+
+```text
+BERHOT/
+├── models/{jsm,nabra,sora,fann,bahr,edrak}/     # source code
+└── storage/
+    ├── data/{raw,processed,curated}/           # curated inputs by modality/version
+    ├── artifacts/
+    │   ├── jsm/nano/mvp/<run-id>/
+    │   ├── nabra/nano/<run-id>/
+    │   ├── sora/nano/mvp/<run-id>/
+    │   ├── fann/<variant>/<run-id>/
+    │   ├── bahr/<variant>/<run-id>/
+    │   └── edrak/<variant>/<run-id>/
+    └── releases/
+        ├── jsm/<variant>/<version>/
+        ├── nabra/<variant>/<version>/
+        ├── sora/<variant>/<version>/
+        └── {fann,bahr,edrak}/<variant>/<version>/
+```
+
+`berhot_storage.paths` is a **shared Python utility for future families**:
+
+```python
+from berhot_storage.paths import artifact_root, release_root, new_artifact_run
+
+run = new_artifact_run("fann", "nano", "mvp", "train")
+# <repo>/storage/artifacts/fann/nano/mvp/train-<UTC>-<random>
+approved_release_dir = release_root("fann", "nano", "0.1.0")
+# <repo>/storage/releases/fann/nano/0.1.0
+```
+
+The helper is repository-relative through the module's `__file__`, not the
+process current working directory. For a program launched inside a nested
+MVP directory, put the BERHOT repository root on `PYTHONPATH` or use a
+family-local bridge as done in `models/sora/variants/nano/mvp/src/storage_paths.py`.
+Future model code should use this shared helper, not copy string-based paths.
+**Existing Nabra/JSM paths are not modified by the Sora integration.**
+
+All five Sora Nano trainers now save under the central
+`storage/artifacts/sora/nano/mvp/` by default, regardless of `cd`.
+Sora samples, preview grids and audit reports also default there when no
+output destination is explicitly given. Existing `--output`, `--output-dir`
+and `--output-root` overrides are honored; writing explicitly to `/tmp`
+still writes to `/tmp` by design.
+
+Sora's historic checkpoint run layout remains
+`<run-id>/checkpoint.pt` for compatibility. The fuller
+`checkpoints/`, `evaluations/`, `samples/`, `logs/` layout above is the
+preferred layout for new pipelines. Do not rename existing checkpoint files
+without updating checkpoint references and their metadata.
+
+### Migrating Sora's pre-existing nested MVP runs
+
+The code change redirects **future** runs but does not move any existing
+Mac files. The safe migration command is **dry-run by default**:
+
+```bash
+cd models/sora/variants/nano/mvp
+python3 -m scripts.migrate_storage
+# Review proposed copies. Then explicitly opt in:
+python3 -m scripts.migrate_storage --apply
+```
+
+This copies, verifies SHA-256 for every file and refuses destination
+collisions. It does not delete or rewrite the old checkpoints. Old absolute
+paths remain valid; when using the newly copied model, supply the new absolute
+checkpoint path. Never delete original runs before confirming all callers and
+backups are updated. Copying uses extra disk space; if disk is constrained,
+copy one approved checkpoint manually rather than copying every run.
+
+`storage/releases/` is for **approved, versioned, evaluated** packages,
+not every training experiment. A release requires explicit user approval and
+validated quality. Sora Nano has not met its geometry-generation acceptance
+gate and has **not** been packaged as a production release. A directory marker
+in the repository is not evidence that a release exists. Both
+`storage/artifacts/` and `storage/releases/` are Git-ignored, except
+for optional `.gitkeep` markers. Do not automatically sync to R2.
