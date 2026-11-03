@@ -660,3 +660,84 @@ measurements will decide whether the next research area is schedule/
 sampler dynamics, the word-conditioned noise network, or the
 data/geometry representation. **Do not start another 300/10000-step
 fine-tuning run on the existing objective.**
+
+## 82 passing tests; reverse trace localizes triangle collapse (2026-11-03)
+
+User ran **82/82 Mac tests**, then executed the full 100-step
+posterior-mean reverse process with SAME initial Gaussian RGB noise
+for red square and red triangle in English and Arabic using the
+existing best 800-step spatial checkpoint.
+
+| Measurement | English | Arabic |
+|---|---:|---:|
+| Initial x0 clip fraction (t99, square) | 0.991862 | 0.994141 |
+| Initial x0 clip fraction (t99, triangle) | 0.992839 | 0.993164 |
+| Square/triangle mask IoU at t49 | 0.932115 | 0.936842 |
+| Square/triangle mask IoU at t0 | 0.916986 | 0.922078 |
+| Final square predicted class | square | square |
+| Final triangle predicted class | **square** | **square** |
+
+Both complete traces executed all 100 reverse timesteps and generated
+square-like red blocks even on triangle prompts. At t99 nearly all
+estimated clean-image RGB channels exceeded [-1,1] and were clipped.
+By t49 clipping fell below ~8% but square and triangle foreground
+masks already converged above 93% IoU. This supports a hypothesis of
+early trajectory/canonical-shape collapse, but NOT proof that clipping
+alone causes the missing triangles: most DDPM models predict noisy
+raw x0 at the terminal timestep, and hard clipping is common.
+
+Reports were saved by user at
+`/tmp/sora-trace-en-1793713003/report.json` and
+`/tmp/sora-trace-ar-1793713003/report.json`.
+
+### Optional fixed vs dynamic x0 clipping ablation (code unverified on Mac)
+
+An inference-only `x0_clipping` policy is added to the existing
+pixel `generate` and 24-image evaluation CLI. **Default remains
+`fixed`**, reproducing all original generation behavior and existing
+tests. `dynamic` uses per-sample 99.5th percentile abs(x0),
+clamps each clean prediction to ±max(1,percentile), then rescales
+it to [-1,1]. This prevents nearly 100% saturation at the earliest
+timesteps but can make outputs blurry/desaturated. No learned
+model weights, tokenizer, data generator, or training loop changes.
+
+Evaluate both modes from the SAME trained checkpoint, prompts, seeds,
+sampler (posterior_mean) and CFG 5.0. Store explicit clipping-policy
+metadata in reports. For safety, the **model-promotion quality gate
+rejects comparisons with different clipping policies**, even if
+they share a model: review both metrics as an inference ablation,
+not a same-protocol promotion. Old reports lacking this metadata
+implicitly use fixed clipping.
+
+If dynamic clipping still creates squares for triangles—or destroys
+the eight working circle/square concepts—reject it. Avoid a longer
+training run. This is a controlled hypothesis test, not a fix.
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+CKPT="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+OUT="/tmp/sora-x0-ablation-$(date +%s)"
+
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$CKPT" --sampler posterior_mean \
+  --guidance-scales 5 --seeds 42 \
+  --x0-clipping fixed --output-dir "$OUT-fixed"
+
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$CKPT" --sampler posterior_mean \
+  --guidance-scales 5 --seeds 42 \
+  --x0-clipping dynamic --output-dir "$OUT-dynamic"
+
+open "$OUT-fixed/guidance_5_seed_42/preview_grid.png"
+open "$OUT-dynamic/guidance_5_seed_42/preview_grid.png"
+```
+
+Changes include five new regression tests for fixed-default
+reproducibility, dynamic bounded output and seed determinism, exported
+policy metadata, and legacy quality-gate handling. Those new tests
+must pass on the Mac before trusting the results.
