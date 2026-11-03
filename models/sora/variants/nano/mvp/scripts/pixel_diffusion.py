@@ -443,7 +443,8 @@ def main():
                    help="Optional override; default is BERHOT/storage/artifacts/sora/nano/mvp")
     e=sub.add_parser("evaluate")
     e.add_argument("--checkpoint",required=True)
-    e.add_argument("--output-dir",required=True)
+    e.add_argument("--output-dir",default=None,
+                   help="Default: unique evaluation run in central BERHOT artifacts")
     e.add_argument("--seed",type=int,default=42)
     e.add_argument("--sample-steps",type=int,default=None)
     e.add_argument("--sampler",choices=("posterior_mean","ancestral","ddim"),default="posterior_mean")
@@ -455,7 +456,8 @@ def main():
     s=sub.add_parser("sample")
     s.add_argument("--checkpoint",required=True)
     s.add_argument("--prompt",required=True)
-    s.add_argument("--output",required=True)
+    s.add_argument("--output",default=None,
+                   help="Default: unique sample PNG in central BERHOT artifacts")
     s.add_argument("--seed",type=int,default=42)
     s.add_argument("--sample-steps",type=int,default=None)
     s.add_argument("--sampler",choices=("posterior_mean","ancestral","ddim"),default="posterior_mean")
@@ -465,11 +467,14 @@ def main():
     args=p.parse_args()
     if args.action=="train": train(args)
     elif args.action=="evaluate":
-        evaluate(load_model(args.checkpoint,args.device),args.output_dir,args.seed,args.sample_steps,sampler=args.sampler,guidance_scale=args.guidance_scale,shared_noise=args.shared_noise,x0_clipping=args.x0_clipping)
+        output_dir=args.output_dir or str(sora_run("pixel-eval"))
+        evaluate(load_model(args.checkpoint,args.device),output_dir,args.seed,args.sample_steps,sampler=args.sampler,guidance_scale=args.guidance_scale,shared_noise=args.shared_noise,x0_clipping=args.x0_clipping)
     else:
         model=load_model(args.checkpoint,args.device)
         require_guidance_training(model, args.guidance_scale)
-        save_image(generate(model,args.prompt,args.seed,args.device,args.sample_steps,sampler=args.sampler,guidance_scale=args.guidance_scale,x0_clipping=args.x0_clipping),args.output)
-        print(json.dumps({"output":args.output,"prompt":args.prompt},ensure_ascii=False))
+        output=Path(args.output) if args.output else sora_run("pixel-sample")/"sample.png"
+        output.parent.mkdir(parents=True,exist_ok=True)
+        save_image(generate(model,args.prompt,args.seed,args.device,args.sample_steps,sampler=args.sampler,guidance_scale=args.guidance_scale,x0_clipping=args.x0_clipping),output)
+        print(json.dumps({"output":str(output),"prompt":args.prompt},ensure_ascii=False))
 
 if __name__=="__main__": main()
