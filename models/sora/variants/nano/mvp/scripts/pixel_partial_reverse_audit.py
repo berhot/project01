@@ -17,6 +17,7 @@ import torch
 
 from scripts.pixel_conditioning_audit import validation_items
 from scripts.pixel_diffusion import load_model, require_guidance_training
+from src.storage_paths import sora_run
 from scripts.pixel_geometry_audit import foreground, mask_iou
 from src.pixel_dataset_v2 import COLORS
 from src.pixel_diffusion import guided_noise, noise_schedule
@@ -197,7 +198,7 @@ def save_audit(report,images,output_dir,scale=5):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--checkpoint",required=True)
-    parser.add_argument("--output-dir",required=True)
+    parser.add_argument("--output-dir",default=None)
     parser.add_argument("--seeds",type=int,nargs="+",default=[42])
     parser.add_argument("--colors",nargs="+",default=["red"])
     parser.add_argument("--start-timesteps",type=int,nargs="+",
@@ -215,9 +216,10 @@ def main():
         guidance_scale=args.guidance_scale
     )
     report["checkpoint"]=args.checkpoint
-    preview=save_audit(report,images,args.output_dir)
+    output_dir=args.output_dir or str(sora_run("partial-reverse"))
+    preview=save_audit(report,images,output_dir)
     print(json.dumps({
-        "report":str(Path(args.output_dir)/"report.json"),
+        "report":str(Path(output_dir)/"report.json"),
         "preview_grid":str(preview),
         "evaluation_count":report["evaluation_count"],
         "by_start_timestep":report["by_start_timestep"],
