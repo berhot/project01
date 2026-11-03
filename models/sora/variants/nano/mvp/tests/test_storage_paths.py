@@ -95,6 +95,30 @@ class SharedStorageTests(unittest.TestCase):
                 migrate(src,dst,apply=True)
             self.assertEqual((model/"checkpoint.pt").read_bytes(),b"fake weights fixture")
 
+    def test_selective_run_migration_limits_extra_disk_usage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            src=root/"legacy"
+            dst=root/"central"
+            one=src/"pixel-important"
+            two=src/"pixel-failed"
+            one.mkdir(parents=True)
+            two.mkdir(parents=True)
+            (one/"checkpoint.pt").write_bytes(b"best")
+            (two/"checkpoint.pt").write_bytes(b"unwanted")
+            plan=migrate(src,dst,run_ids=["pixel-important"])
+            self.assertEqual([r["run"] for r in plan["runs"]],
+                             ["pixel-important"])
+            result=migrate(src,dst,apply=True,run_ids=["pixel-important"])
+            self.assertEqual(result["runs"][0]["status"],"copied-verified")
+            self.assertEqual((dst/"pixel-important"/"checkpoint.pt").read_bytes(),
+                             b"best")
+            self.assertFalse((dst/"pixel-failed").exists())
+            self.assertEqual((two/"checkpoint.pt").read_bytes(),b"unwanted")
+            for unsafe in ("../unsafe","/tmp/unsafe",".",""):
+                with self.assertRaises(ValueError):
+                    migrate(src,dst,run_ids=[unsafe])
+
     def test_migration_guards_nested_destinations_and_symlinks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
