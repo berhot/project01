@@ -12,13 +12,14 @@ import math
 from pathlib import Path
 
 from PIL import Image, ImageDraw
+import numpy as np
 import torch
 
 from scripts.pixel_conditioning_audit import validation_items
 from scripts.pixel_diffusion import load_model, require_guidance_training
 from scripts.pixel_geometry_audit import foreground, mask_iou
 from src.pixel_dataset_v2 import COLORS
-from src.pixel_diffusion import guided_noise, noise_schedule, save_image
+from src.pixel_diffusion import guided_noise, noise_schedule
 from src.pixel_metrics import analyze_image
 
 
@@ -180,8 +181,7 @@ def save_audit(report,images,output_dir,scale=5):
         for col,start in enumerate(timesteps):
             image=images[(start,key)]
             rgb=((image.permute(1,2,0).clamp(-1,1).numpy()+1)*127.5).round()
-            from numpy import uint8
-            tile=Image.fromarray(rgb.astype(uint8)).resize(
+            tile=Image.fromarray(rgb.astype(np.uint8)).resize(
                 (cell,cell),Image.Resampling.NEAREST
             )
             x,y=col*cell,row*tile_height
