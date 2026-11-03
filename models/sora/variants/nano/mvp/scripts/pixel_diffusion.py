@@ -19,6 +19,7 @@ from src.pixel_metrics import analyze_image, summarize
 from src.pixel_diffusion import (
     COLORS, SHAPES, WORDS, PixelConfig, PixelDenoiser, caption,
     generate, save_image, synthetic_example, training_loss, vocabulary_for,
+    shape_aware_training_objective,
 )
 from src.pixel_dataset_v2 import (
     CONCEPTS as CONCEPTS_V2, caption_v2, balanced_training_batch,
@@ -34,9 +35,13 @@ PROMPTS = [
 def load_model(path,device="cpu"):
     record=torch.load(path,map_location="cpu",weights_only=True)
     if (record.get("schema_version")!=1
-            or record.get("architecture")!="rgb-unet-text-v1"):
+            or record.get("architecture") not in (
+                "rgb-unet-text-v1","rgb-unet-spatial-text-v2"
+            )):
         raise ValueError("Incompatible Sora pixel diffusion checkpoint")
     cfg=PixelConfig(**record["config"])
+    if cfg.architecture != record["architecture"]:
+        raise ValueError("Checkpoint architecture does not match config")
     if record.get("vocabulary") != list(vocabulary_for(cfg.dataset_version)):
         raise ValueError("Checkpoint vocabulary does not match its dataset version")
     model=PixelDenoiser(cfg)
@@ -122,15 +127,37 @@ def initialize_v2_from_v2(model, checkpoint):
     source = load_model(checkpoint, "cpu")
     if source.config.dataset_version != "v2":
         raise ValueError("v2 fine-tuning requires a v2 RGB checkpoint")
-    if source.config != model.config:
+    source_state=source.state_dict()
+    if source.config == model.config:
+        model.load_state_dict(source_state,strict=True)
+        transfer_method="v2 RGB weights reloaded; optimizer reset"
+    elif (source.config.architecture=="rgb-unet-text-v1"
+            and model.config.architecture=="rgb-unet-spatial-text-v2"
+            and all(getattr(source.config,key)==getattr(model.config,key)
+                    for key in ("channels","text_dim","diffusion_steps",
+                                "image_size","max_tokens","dataset_version"))):
+        # New spatial-attention residuals start at EXACTLY zero output.
+        # Every older U-Net / text layer retains its original trained weights.
+        target_state=model.state_dict()
+        for name,tensor in source_state.items():
+            if name not in target_state or target_state[name].shape!=tensor.shape:
+                raise ValueError(f"Incompatible transferable RGB weight: {name}")
+            target_state[name]=tensor.to(target_state[name].device).clone()
+        added=set(target_state)-set(source_state)
+        if not added or any(not k.startswith(("spatial16.","spatial32."))
+                            for k in added):
+            raise ValueError("Unexpected new-architecture parameter keys")
+        model.load_state_dict(target_state,strict=True)
+        transfer_method="v2 pooled RGB weights -> spatial-text RGB architecture; zero-initialized new attention; optimizer reset"
+    else:
         raise ValueError("Fine-tuning checkpoint architecture/config does not match")
-    model.load_state_dict(source.state_dict(), strict=True)
     metadata = torch.load(checkpoint, map_location="cpu", weights_only=True)
     return {
         "source_checkpoint": str(checkpoint),
         "source_dataset_version": "v2",
+        "source_architecture": source.config.architecture,
         "source_training_steps": metadata.get("training_steps"),
-        "method": "v2 RGB model weights reloaded for further training; optimizer reset",
+        "method": transfer_method,
     }
 
 
@@ -150,6 +177,14 @@ def train(args):
     init_v1 = getattr(args, "init_from_v1", None)
     init_v2 = getattr(args, "init_from_v2", None)
     triangle_fraction = getattr(args, "triangle_fraction", None)
+    conditioning = getattr(args,"conditioning","pooled")
+    silhouette_weight = getattr(args,"silhouette_weight",0.15)
+    if conditioning not in ("pooled","spatial"):
+        raise ValueError("conditioning must be pooled or spatial")
+    if conditioning=="spatial" and args.dataset_version!="v2":
+        raise ValueError("Spatial text architecture is only supported for dataset v2")
+    if not 0 <= silhouette_weight <= 2:
+        raise ValueError("silhouette_weight must be between 0 and 2")
     if init_v1 and init_v2:
         raise ValueError("Cannot initialize from both v1 and v2")
     if triangle_fraction is not None and args.dataset_version != "v2":
@@ -160,8 +195,10 @@ def train(args):
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
+    architecture=("rgb-unet-spatial-text-v2" if conditioning=="spatial"
+                  else "rgb-unet-text-v1")
     cfg=PixelConfig(channels=args.channels,diffusion_steps=args.diffusion_steps,
-                    dataset_version=args.dataset_version)
+                    dataset_version=args.dataset_version,architecture=architecture)
     model=PixelDenoiser(cfg).to(args.device)
     warm_start = None
     if init_v1 is not None:
@@ -193,13 +230,28 @@ def train(args):
             tokens=torch.stack([item[1] for item in batch]).to(args.device)
         model.train()
         optimizer.zero_grad(set_to_none=True)
-        loss=training_loss(model,images,tokens,cfg_drop_prob=args.cfg_drop_prob)
+        if cfg.architecture=="rgb-unet-spatial-text-v2":
+            objectives=shape_aware_training_objective(
+                model,images,tokens,cfg_drop_prob=args.cfg_drop_prob,
+                silhouette_weight=silhouette_weight
+            )
+            loss=objectives["total_loss"]
+            noise_value=float(objectives["noise_mse"])
+            silhouette_value=float(objectives["silhouette_loss"])
+        else:
+            loss=training_loss(model,images,tokens,cfg_drop_prob=args.cfg_drop_prob)
+            noise_value=float(loss.detach())
+            silhouette_value=None
         if not torch.isfinite(loss): raise FloatingPointError("Non-finite image diffusion loss")
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(),1)
         optimizer.step()
         if step==1 or step%args.log_every==0 or step==args.steps:
-            print(json.dumps({"step":step,"noise_mse":round(float(loss.detach()),6)}),flush=True)
+            report={"step":step,"noise_mse":round(noise_value,6)}
+            if silhouette_value is not None:
+                report["silhouette_dice_loss"]=round(silhouette_value,6)
+                report["total_loss"]=round(float(loss.detach()),6)
+            print(json.dumps(report),flush=True)
     path=run/"checkpoint.pt"
     torch.save({
         "schema_version":1,"architecture":cfg.architecture,"family":"sora",
@@ -208,6 +260,7 @@ def train(args):
         "cfg_drop_prob":args.cfg_drop_prob,
         "warm_start":warm_start,
         "triangle_fraction":triangle_fraction,
+        "silhouette_weight":silhouette_weight if conditioning=="spatial" else None,
         "model":{k:v.detach().cpu() for k,v in model.state_dict().items()},
         "seed":args.seed,"training_steps":args.steps,
         "training_distribution":(
@@ -263,7 +316,7 @@ def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mea
     grid.save(path/"preview_grid.png")
     metrics = summarize(predictions,dataset_version=version)
     (path/"report.json").write_text(json.dumps({
-        "schema_version":1,"architecture":"rgb-unet-text-v1",
+        "schema_version":1,"architecture":model.config.architecture,
         "dataset_version":version,
         "training_data":"synthetic; no photorealistic or open-domain data",
         "image_pixels_generated_by_diffusion":True,
@@ -294,6 +347,10 @@ def main():
     init.add_argument("--init-from-v2",default=None,help="Optional trained v2 checkpoint to fine-tune; new optimizer, new checkpoint")
     t.add_argument("--triangle-fraction",type=float,default=None,
                    help="Opt-in v2 curriculum; e.g. 0.50 trains 50 percent triangle examples")
+    t.add_argument("--conditioning",choices=("pooled","spatial"),default="pooled",
+                   help="Opt-in new per-pixel text attention architecture")
+    t.add_argument("--silhouette-weight",type=float,default=0.15,
+                   help="Spatial model training-only RGB silhouette Dice loss weight")
     t.add_argument("--diffusion-steps",type=int,default=100)
     t.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     t.add_argument("--cpu-threads",type=int,default=2)
