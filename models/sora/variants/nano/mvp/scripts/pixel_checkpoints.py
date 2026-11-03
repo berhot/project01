@@ -18,17 +18,20 @@ from src.pixel_diffusion import vocabulary_for
 
 def read_metadata(path):
     record=torch.load(path,map_location="cpu",weights_only=True)
-    if record.get("architecture")!="rgb-unet-text-v1":
+    if record.get("architecture") not in ("rgb-unet-text-v1","rgb-unet-spatial-text-v2"):
         raise ValueError(f"Not an RGB pixel checkpoint: {path}")
     cfg=record["config"]
     version=cfg.get("dataset_version","v1")
     if version not in ("v1","v2"):
         raise ValueError(f"Invalid dataset_version: {path}")
+    if cfg.get("architecture","rgb-unet-text-v1") != record.get("architecture"):
+        raise ValueError(f"Architecture metadata mismatch: {path}")
     if record.get("vocabulary")!=list(vocabulary_for(version)):
         raise ValueError(f"Checkpoint vocabulary mismatch: {path}")
     return {
         "checkpoint":str(path),
         "dataset_version":version,
+        "architecture":record["architecture"],
         "training_steps":int(record.get("training_steps",0)),
         "base_channels":int(cfg["channels"]),
         "diffusion_steps":int(cfg["diffusion_steps"]),
