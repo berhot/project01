@@ -273,3 +273,39 @@ triangles, stop sampler tweaking and design a genuinely
 shape-discriminative denoising objective / training ablation
 before another long GPU or CPU run. A sampler change alone is
 not proof that learned shape semantics exist.
+
+## Sampler regression fix (2026-11-03)
+
+A user ran the new `test_pixel_ancestral.py` and got 1 Gaussian
+draw instead of 8. Investigation found a reverse timestep loop typo
+in the **recent** sampler update:
+
+```python
+# BROKEN (empty range)
+for t in range(total - 1, -1):
+    ...
+
+# FIXED (all T reverse steps)
+for t in range(total - 1, -1, -1):
+    ...
+```
+
+The wrong loop made both `ancestral` and `posterior_mean` return
+clipped initial Gaussian noise without performing denoising.
+The sampler implementation was corrected and tests now assert
+**T actual denoiser calls with timesteps T-1,T-2,...,0**,
+plus T total random draws for ancestral (one initialization and T-1
+reverse-noise draws) versus one random draw for deterministic mean.
+
+**Crucial provenance:** inspecting historical commits shows the
+reverse loop was correct at the time of the user's prior v2 spatial
+model image evaluations. The incorrect loop was introduced during
+the later sampler extension and was caught before the user ran
+the new ancestral/shared-noise comparison. Hence prior user-supplied
+trained checkpoint weights and reported visual grids do not need
+to be discarded because of this regression.
+
+The corrected new tests are **awaiting a Mac run**, and this
+does NOT establish ancestral sampling will generate triangles.
+The old checkpoints remain untouched; GitHub workflow remains
+manual-only.
