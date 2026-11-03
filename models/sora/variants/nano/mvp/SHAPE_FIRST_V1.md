@@ -146,9 +146,13 @@ python3 -m scripts.shape_first evaluate \
   --run-dir "$RUN" --seed 42
 ```
 
-The command prints its exact `preview_grid.png`, `report.json`,
-per-shape strict geometry pass counts, bilingual consistency and
-color accuracy; it saves 24 individual generated PNGs centrally.
+The command prints its exact **RGB** `preview_grid.png` and
+separate **learned-mask** `learned_masks_preview_grid.png` paths,
+plus `report.json`, per-shape strict geometry pass counts,
+bilingual consistency and color accuracy. It saves **24 generated
+RGB PNGs and 24 corresponding actual learned mask PNGs** centrally.
+The mask gallery makes it possible to see whether the failure is
+in the trained mask generator or the trained RGB appearance network.
 
 Open the printed `preview_grid.png` with `open "<EXACT_PATH>"`.
 
