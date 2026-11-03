@@ -12,6 +12,7 @@ from PIL import Image, ImageDraw
 import torch
 
 from src.pixel_dataset_v2 import CONCEPTS, synthetic_example_v2
+from src.storage_paths import sora_run
 
 
 def preview(output_dir,seed=42,split="validation",scale=8):
@@ -65,14 +66,14 @@ def main():
     parser=argparse.ArgumentParser()
     modes=parser.add_subparsers(dest="command",required=True)
     p=modes.add_parser("preview")
-    p.add_argument("--output-dir",required=True)
+    p.add_argument("--output-dir",default=None)
     p.add_argument("--seed",type=int,default=42)
     p.add_argument("--split",choices=("train","validation"),default="validation")
     p.add_argument("--scale",type=int,default=8)
     args=parser.parse_args()
     if not 1 <= args.scale <= 20:
         parser.error("scale must be 1..20")
-    preview(args.output_dir,args.seed,args.split,args.scale)
+    preview(args.output_dir or sora_run("dataset-preview"),args.seed,args.split,args.scale)
 
 
 if __name__=="__main__":
