@@ -1339,3 +1339,63 @@ python3 -m scripts.pixel_diagnose \
 The new geometry-audit tests are committed but have **not yet
 been executed on the user's Mac**. Do not run another long training
 trial until these shape-specific results are available.
+
+## Geometry bottleneck: test the full reverse chain from known noisy shapes
+
+The latest **91/91 Mac tests passed**. The 800-step spatial model's
+one-step estimates from held-out validation x_t retained nearly
+perfect shape information at t=5/20, but degraded strongly at
+t=50 and t=80 (combined mask IoU **0.9528**, then **0.5382**;
+combined correct-shape recognition **59.38%**, then **15.63%**).
+Triangles were recognizable in much of the low-noise
+reconstruction task. Yet pure-noise triangle generation still
+fails, and dynamic clipping yielded **0% triangles** and lowered
+circles to 75%. Keep the original fixed x0 policy.
+
+The next read-only experiment, `scripts.pixel_partial_reverse_audit`,
+starts at ordinary forward-noised **real held-out** square/triangle
+images at t=20,50,80,99, then applies the complete learned RGB
+posterior-mean reverse process down to t=0. Correct and swapped
+English/Arabic shape words receive **the exact same starting x_t**;
+square/triangle targets of one color+language+seed also receive the
+same Gaussian epsilon. Outputs are learned RGB reconstructions, not
+PIL-drawn shapes. This is **conditional reconstruction**, not
+pure-noise text-to-image generation.
+
+The script writes `report.json` and a preview grid of actual learned
+output RGB pixels; it reports IoU to the known target silhouette,
+correct-shape fraction, triangle and square fractions per starting
+timestep, and correct-vs-swapped shape-caption advantage.
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+test -f "$BASE" || { echo "Missing trained checkpoint"; false; }
+OUT="/tmp/sora-partial-reverse-$(date +%s)"
+
+python3 -m scripts.pixel_partial_reverse_audit \
+  --checkpoint "$BASE" \
+  --colors red --seeds 42 \
+  --start-timesteps 20 50 80 99 \
+  --guidance-scale 5 --cpu-threads 2 \
+  --output-dir "$OUT"
+
+open "$OUT/preview_grid.png"
+```
+
+New five tests validate all selected reverse steps, reproducibility,
+correct-vs-swapped prompting, matched square/triangle q(x_t)
+noise, nonmutating model weights and preview export. **Mac tests
+not yet run.** No training changes or additional checkpoints.
+
+If final triangles succeed when starting at t20/50 but not 80/99,
+the bottleneck likely lies in the **high-noise generative
+trajectory**. If they fail even when starting from t20 despite
+near-perfect one-step recovery, investigate accumulated reverse
+steps and conditioning/guidance mismatch. No further multi-
+thousand-step CPU runs are justified before reviewing this result.
