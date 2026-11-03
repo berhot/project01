@@ -474,3 +474,52 @@ The gate itself is NOT visual proof; inspect the actual 24 PNGs.
 **Do not continue to 300 or 10,000 steps if either the gate fails
 or the visual triangles are still missing.** Preserve all checkpoints;
 PR remains draft and GitHub Actions manual-only.
+
+## Frozen teacher + tiny paired loss: preserved old classes but zero triangles (2026-11-03)
+
+User Mac ran **71 tests successfully** and completed 20-step spatial-v2
+fine-tune using frozen old-shape teacher, paired-shape weight 0.02,
+teacher preservation weight 1.0, learning rate 0.00002.
+The checkpoint remains separate:
+`storage/artifacts/sora/nano/mvp/pixel-20261103T131058Z-65110681/checkpoint.pt`.
+
+The user provided actual 24-image CFG-5, seed-42 generated contact
+sheet. Circles and squares are visually preserved, but **all eight
+English/Arabic triangle examples still resemble squares or blocks**.
+The toy segmentation results remained:
+- **100% color**
+- **100% circles**
+- **100% squares**
+- **0% triangles**
+- **66.67% strict prompt** (16/24 outputs)
+- **66.67% bilingual both correct** (8/12 pairs)
+
+This matches the good 800-step spatial baseline on the same model
+benchmark. The frozen teacher therefore prevented the severe earlier
+regression, but the candidate **must not be promoted as solving
+triangles**. The shape-focused training alone is not ready for more
+compute.
+
+A compatibility bug in the new `scripts.pixel_quality_gate` rejected
+comparing the older base report (which predated the
+`shared_noise_across_concepts` key) to the new report (explicit
+`false`). The earlier evaluation always used independent per-prompt
+seeds, so an omitted legacy key is semantically `false`. Fixed the
+gate to default the missing key to `false` and added regression tests
+that still reject explicit `true` or an invalid string value.
+**The corrected tests have not yet been run on the user's Mac.**
+
+After pulling, rerun the gate on the existing saved reports; no
+training and no image regeneration are needed:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_pixel_quality_gate.py' -v
+python3 -m scripts.pixel_quality_gate \
+  --baseline-report /tmp/sora-spatial-eval-1793689086/guidance_5_seed_42/report.json \
+  --candidate-report /tmp/sora-safe20-eval-1793711582/guidance_5_seed_42/report.json
+```
+
+Expected outcome: print a valid JSON decision,
+`accepted_by_toy_gate: false`, because triangles remain 0%; exit
+status **2** is an intentional gate rejection, not an exception.
+All original checkpoints remain in place and PR #10 stays draft.
