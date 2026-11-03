@@ -111,6 +111,29 @@ def initialize_v2_from_v1(model, checkpoint):
     }
 
 
+def initialize_v2_from_v2(model, checkpoint):
+    """Start a NEW v2 fine-tuning run from existing v2 model weights.
+
+    AdamW state is intentionally reset; this is a fine-tune, not an exact
+    optimizer-state resume. The source checkpoint is never overwritten.
+    """
+    if model.config.dataset_version != "v2":
+        raise ValueError("v2 fine-tuning requires a v2 destination")
+    source = load_model(checkpoint, "cpu")
+    if source.config.dataset_version != "v2":
+        raise ValueError("v2 fine-tuning requires a v2 RGB checkpoint")
+    if source.config != model.config:
+        raise ValueError("Fine-tuning checkpoint architecture/config does not match")
+    model.load_state_dict(source.state_dict(), strict=True)
+    metadata = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    return {
+        "source_checkpoint": str(checkpoint),
+        "source_dataset_version": "v2",
+        "source_training_steps": metadata.get("training_steps"),
+        "method": "v2 RGB model weights reloaded for further training; optimizer reset",
+    }
+
+
 def require_guidance_training(model, guidance_scale):
     if guidance_scale != 1.0 and getattr(model, "cfg_drop_prob", 0.0) <= 0:
         raise ValueError(
@@ -124,6 +147,15 @@ def train(args):
             or args.cpu_threads < 1 or args.log_every < 1
             or not 0 <= args.cfg_drop_prob < 1):
         raise ValueError("Invalid training arguments")
+    init_v1 = getattr(args, "init_from_v1", None)
+    init_v2 = getattr(args, "init_from_v2", None)
+    triangle_fraction = getattr(args, "triangle_fraction", None)
+    if init_v1 and init_v2:
+        raise ValueError("Cannot initialize from both v1 and v2")
+    if triangle_fraction is not None and args.dataset_version != "v2":
+        raise ValueError("Triangle curriculum is only supported for dataset v2")
+    if triangle_fraction is not None and not 0 <= triangle_fraction <= 1:
+        raise ValueError("triangle_fraction must be in [0,1]")
     if args.device=="cpu": torch.set_num_threads(args.cpu_threads)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -132,8 +164,11 @@ def train(args):
                     dataset_version=args.dataset_version)
     model=PixelDenoiser(cfg).to(args.device)
     warm_start = None
-    if args.init_from_v1 is not None:
-        warm_start = initialize_v2_from_v1(model, args.init_from_v1)
+    if init_v1 is not None:
+        warm_start = initialize_v2_from_v1(model, init_v1)
+    elif init_v2 is not None:
+        warm_start = initialize_v2_from_v2(model, init_v2)
+    if warm_start is not None:
         print(json.dumps({"warm_start":warm_start},ensure_ascii=False),flush=True)
     optimizer=torch.optim.AdamW(model.parameters(),lr=args.learning_rate)
     run=Path(args.output_root)/(
@@ -141,7 +176,9 @@ def train(args):
     run.mkdir(parents=True,exist_ok=False)
     for step in range(1,args.steps+1):
         if cfg.dataset_version == "v2":
-            images, tokens = balanced_training_batch(step,args.batch_size,args.seed)
+            images, tokens = balanced_training_batch(
+                step,args.batch_size,args.seed,triangle_fraction=triangle_fraction
+            )
             images, tokens = images.to(args.device), tokens.to(args.device)
         else:
             batch=[]
@@ -170,6 +207,7 @@ def train(args):
         "dataset_version":cfg.dataset_version,
         "cfg_drop_prob":args.cfg_drop_prob,
         "warm_start":warm_start,
+        "triangle_fraction":triangle_fraction,
         "model":{k:v.detach().cpu() for k,v in model.state_dict().items()},
         "seed":args.seed,"training_steps":args.steps,
         "training_distribution":(
@@ -251,7 +289,11 @@ def main():
     t.add_argument("--base-channels","--channels",dest="channels",type=int,default=32)
     t.add_argument("--cfg-drop-prob",type=float,default=0.15)
     t.add_argument("--dataset-version",choices=("v1","v2"),default="v1")
-    t.add_argument("--init-from-v1",default=None,help="Optional original v1 RGB checkpoint to warm-start new v2 model")
+    init=t.add_mutually_exclusive_group()
+    init.add_argument("--init-from-v1",default=None,help="Optional original v1 RGB checkpoint to warm-start new v2 model")
+    init.add_argument("--init-from-v2",default=None,help="Optional trained v2 checkpoint to fine-tune; new optimizer, new checkpoint")
+    t.add_argument("--triangle-fraction",type=float,default=None,
+                   help="Opt-in v2 curriculum; e.g. 0.50 trains 50 percent triangle examples")
     t.add_argument("--diffusion-steps",type=int,default=100)
     t.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     t.add_argument("--cpu-threads",type=int,default=2)
