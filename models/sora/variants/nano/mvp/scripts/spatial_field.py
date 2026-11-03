@@ -152,14 +152,14 @@ def main():
                    help="Default: BERHOT/storage/artifacts/sora/nano/mvp")
     p = sub.add_parser("evaluate")
     p.add_argument("--checkpoint", required=True)
-    p.add_argument("--output-dir", required=True)
+    p.add_argument("--output-dir", default=None)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--device", choices=("cpu", "mps", "cuda"), default="cpu")
     p = sub.add_parser("sample")
     p.add_argument("--checkpoint", required=True)
     p.add_argument("--prompt", required=True)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--output", required=True)
+    p.add_argument("--output", default=None)
     p.add_argument("--device", choices=("cpu", "mps", "cuda"), default="cpu")
     args = parser.parse_args()
     if args.mode == "train":
@@ -167,12 +167,14 @@ def main():
             parser.error("cpu-threads must be >= 1")
         train(args)
     elif args.mode == "evaluate":
-        evaluate(restore(args.checkpoint, args.device), args.output_dir, seed=args.seed)
+        evaluate(restore(args.checkpoint, args.device), args.output_dir or sora_run("spatial-eval"), seed=args.seed)
     else:
         model = restore(args.checkpoint, args.device)
         image, _, _ = render(model, caption_id(args.prompt), args.seed, args.device)
-        save_field_png(image, args.output)
-        print(json.dumps({"output": args.output, "prompt": args.prompt}))
+        output=Path(args.output) if args.output else sora_run("spatial-sample")/"sample.png"
+        output.parent.mkdir(parents=True,exist_ok=True)
+        save_field_png(image,output)
+        print(json.dumps({"output":str(output), "prompt":args.prompt}))
 
 
 if __name__ == "__main__":
