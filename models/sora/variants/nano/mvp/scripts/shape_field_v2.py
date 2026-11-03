@@ -99,7 +99,7 @@ def load_run(run_dir,device="cpu"):
 
 def train(args):
     init_v2=getattr(args,"init_from_v2",None)
-    preserve_circle_weight=getattr(args,"circle_preserve_weight",0.2)
+    preserve_circle_weight=getattr(args,"circle_preserve_weight",0.0)
     if (args.mask_steps<1 or args.color_steps<0 or
             args.batch_size<12 or args.batch_size%12 or
             args.log_every<1 or args.cpu_threads<1 or
@@ -417,7 +417,7 @@ def main():
     tr.add_argument("--paired-layout-count",type=int,default=4)
     tr.add_argument("--init-from-v2",default=None,
                     help="Optional exact original V2 run dir; clone weights into NEW V2.1 run")
-    tr.add_argument("--circle-preserve-weight",type=float,default=0.2)
+    tr.add_argument("--circle-preserve-weight",type=float,default=0.0)
     ev=commands.add_parser("evaluate")
     ev.add_argument("--run-dir",required=True)
     ev.add_argument("--seed",type=int,default=42)
