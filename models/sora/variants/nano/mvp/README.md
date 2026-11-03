@@ -395,3 +395,103 @@ and circle/square classification for both languages across several seeds;
 prompt accuracy and bilingual **both-correct** rate should corroborate visual
 inspection. Do not merge as a visually validated model just because noise
 loss decreases or a smoke CI passes.
+
+## Dataset v2 — twelve concepts, bilingual (separate from v1)
+
+**Added, not promoted as a visually trained model.** Dataset v2 expands
+the procedural **training distribution** from 3 colors × 2 shapes to
+**4 colors × 3 shapes = 12 concepts**:
+
+- Colors: red / green / blue / yellow
+- Shapes: circle / square / triangle
+- Backgrounds: warm-white / light-gray / cream
+- Position and size vary per sample; triangles vary orientation
+- English and Arabic captions, three phrasings per concept/language
+- Correct Arabic adjective gender, e.g. `دائرة صفراء` and `مثلث أصفر`
+
+New files: `src/pixel_dataset_v2.py` (streamed synthetic training samples),
+`scripts/dataset_v2.py` (inspection previews), and
+`tests/test_pixel_dataset_v2.py`. An optional `dataset_version` field
+in the RGB model config chooses v1 or v2 vocabulary and checkpoint embedding
+size. **v1 token indices are unchanged**, and previous v1 checkpoints stay
+loadable. Old v1 checkpoint weights cannot generate `yellow triangle` without
+training a new v2 model. Checkpoint loading rejects a mismatched vocabulary.
+
+### Inspect held-out dataset examples before training
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+OUT="/tmp/sora-v2-data-$(date +%s)"
+python3 -m scripts.dataset_v2 preview \
+  --split validation --seed 42 --output-dir "$OUT"
+open "$OUT/preview_grid.png"
+```
+
+**The dataset preview is drawn with PIL. It is NOT model inference.**
+Training samples are created on demand and held in memory per batch; no
+million-file dataset is downloaded or stored on your Mac. A separate
+deterministic PRNG seed namespace is used for the validation split; this
+is a controlled synthetic holdout, not proof of real-world generalization.
+
+### First verify v2 training works, then train the new model
+
+```bash
+python3 -m scripts.pixel_diffusion train \
+  --dataset-version v2 \
+  --steps 100 --batch-size 12 \
+  --base-channels 32 --cfg-drop-prob 0.15 \
+  --device cpu --cpu-threads 2
+
+# Once test results are good, start a fresh, longer v2 experiment:
+python3 -m scripts.pixel_diffusion train \
+  --dataset-version v2 \
+  --steps 10000 --batch-size 12 \
+  --base-channels 32 --cfg-drop-prob 0.15 \
+  --device cpu --cpu-threads 2
+```
+
+Copy the `pixel-.../checkpoint.pt` output from the actual **v2 training
+run**. The original v1 experiment remains stored separately.
+After training finishes:
+
+```bash
+CKPT="PASTE_YOUR_ACTUAL_V2_CHECKPOINT_PATH"
+OUT="/tmp/sora-v2-cfg-$(date +%s)"
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$CKPT" --sampler posterior_mean \
+  --guidance-scales 1 3 5 7.5 --seeds 42 123 \
+  --output-dir "$OUT"
+open "$OUT/guidance_5_seed_42/preview_grid.png"
+cat "$OUT/summary.json"
+```
+
+Each grid now has **24 model-generated images** (12 concepts, both languages).
+Across 4 guidance scales and 2 seeds this yields **192 RGB PNGs**. Heuristic
+scoring uses dataset-specific color/shape rules, counting unknowns as
+failures. Circle-vs-triangle scores and background robustness need human
+inspection; higher guidance can produce distorted shapes. Do not compare
+v1 6-class prompt accuracy directly to v2 12-class accuracy as if they
+were the same benchmark.
+
+### Acceptance gates
+
+1. Unit tests pass, 24 v2 dataset examples inspect correctly, and
+   v2 training/inference writes distinct versioned checkpoints.
+2. Multiple held-out seeds show recognizably correct **all 12** colors/shapes
+   in both languages; review the full galleries, not just a training loss.
+3. Report per-class errors, strict prompt accuracy, Arabic/English
+   both-correct rate, and failures such as missing/merged shapes.
+4. Keep PR #10 in **draft** until actual v2 checkpoints receive visual review.
+   GitHub Actions remains **manual-only** to prevent email floods.
+
+**Known limitation:** This is still synthetic **single-object 32×32**
+pixel diffusion, not a realistic image generator, vector art engine, or
+general-purpose Arabic/English text-to-image foundation model. Next steps
+only after quality evaluation: more diverse licensed image-caption pairs,
+proper cross-attention/encoder design, higher resolution, and multi-object
+composition. Also review the provisional Sora family name before launch.
