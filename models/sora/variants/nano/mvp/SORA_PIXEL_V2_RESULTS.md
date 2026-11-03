@@ -824,3 +824,91 @@ conditional generative dynamics remain suspects. If it cannot
 reconstruct triangles even given valid x_t, representation /
 conditioning/geometry training is the primary target. Either way
 a larger training run is not yet justified.
+
+## 91 tests pass; known-image triangle recovery is strong at low noise (2026-11-03)
+
+The user's Mac ran **91/91 tests successfully**. The original
+800-step spatial-v2 checkpoint was evaluated on **128** held-out,
+ordinary-forward-noised square/triangle images with correctly and
+incorrectly shaped Arabic/English captions, CFG 5, fixed clipping.
+
+| One-step clean-x0 reconstruction from known x_t | Mask IoU | Correct-shape rate |
+|---|---:|---:|
+| t=5 | 1.000000 | 1.000000 |
+| t=20 | 0.998513 | 0.968750 |
+| t=50 | 0.952824 | 0.593750 |
+| t=80 | 0.538197 | 0.156250 |
+
+These are *combined square and triangle* figures, not pure-noise
+text-to-image generation results. By target shape/language, correct
+triangle mask IoU was **0.860803 AR**, **0.839300 EN** averaged over
+all four timesteps. Triangle shape classifier success was
+**0.78125 AR**, **0.84375 EN** over those known noisy targets.
+The denoiser has some capacity to reconstruct triangular shapes
+when x_t still includes information about the real triangle.
+
+Comparison of correct-vs-swapped shape words found only weak
+conditional benefit. An x_t that already contains the shape
+strongly determines reconstruction at low noise—even the *wrong*
+shape word reconstructs a recognizable shape at t=5.
+
+The separate **dynamic-clipping generated-image** diagnosis finally
+confirmed triangle accuracy **0.0**, circle accuracy **0.75**,
+square accuracy **1.0**; strict prompt accuracy **0.5417**. There is
+no evidence dynamic clipping solves triangles. **Keep fixed
+posterior-mean sampling and the existing spatial 800-step checkpoint.**
+
+### New held-out partial reverse study — no training
+
+The next research question is whether the model can retain known
+triangle geometry through **all** remaining reverse steps rather
+than merely estimating x0 once from x_t.
+
+New `scripts.pixel_partial_reverse_audit` constructs real q(x_t|x0)
+from held-out RGB targets at starting timesteps **20, 50, 80 and 99**,
+then applies the full real learned posterior-mean sampler from
+each starting timestep down to zero. It runs one trajectory under
+the correct shape caption, another under the *swapped* shape word,
+with **identical starting noisy pixels**. Triangle and square
+targets of the same color/language/seed also use the same Gaussian
+epsilon. The script reports final target-mask IoU, foreground
+area ratio, triangle-vs-square shape success and correct-caption
+advantage. A preview shows only **learned RGB output images**,
+explicitly labeled as *conditional reconstructions from real x_t*.
+
+This does NOT measure text-to-image from pure random Gaussian,
+since every starting x_t contains varying amounts of the true
+held-out image. It is a controlled study, not a new generator,
+and neither trains nor modifies model checkpoints.
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+
+python3 -m unittest discover -s tests -v
+
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+OUT="/tmp/sora-partial-reverse-$(date +%s)"
+
+python3 -m scripts.pixel_partial_reverse_audit \
+  --checkpoint "$BASE" --colors red \
+  --seeds 42 --start-timesteps 20 50 80 99 \
+  --guidance-scale 5 --cpu-threads 2 \
+  --output-dir "$OUT"
+
+open "$OUT/preview_grid.png"
+```
+
+New five-test file `tests/test_pixel_partial_reverse_audit.py`
+checks actual descending sampler steps, determinism, shared noise
+paired shape construction, late-stage geometry, model-weight
+preservation and export behavior. **New code/tests must pass on
+Mac before relying on any results.**
+
+If the triangle recovers at t50 but fails at t80, that suggests a
+high-noise-to-mid-noise trajectory weakness. If it already fails
+when starting at t20, investigate accumulated sampling error and
+guidance/exposure mismatch despite strong one-step x0 estimates.
+Avoid further training until the partial-reverse results are known.
