@@ -742,3 +742,60 @@ metrics without losing circle, square or color accuracy. Do not claim
 success from low training loss alone. If triangles remain rectangles,
 stop the experiment and reconsider representation or data design,
 rather than repeatedly extending CPU training.
+
+## Diagnose triangle failure without another training run: ancestral DDPM
+
+The 800-step spatial-text v2 plus silhouette training experiment still
+produced **zero recognizable triangles** on the user's Mac. At guidance
+5.0, all circles and squares were correct but triangle accuracy
+remained 0% on both seeds. The actual RGB contact sheet confirms this;
+this is not a false alarm from the toy image heuristic.
+
+Previous evaluation used deterministic `posterior_mean` reverse steps,
+which omit the DDPM posterior Gaussian variance. This may bias samples
+toward average shapes. We now offer an experimental `ancestral`
+sampler that injects **seeded Gaussian posterior variance** at every
+reverse step except the final one (with normal clipped x0 prediction).
+This is closer to standard stochastic DDPM sampling. It does NOT
+change model weights. It can still fail entirely if the learned
+distribution has no usable triangle semantics.
+
+Also add `--shared-noise` to the `evaluate` and
+`scripts.pixel_metrics` CLIs: by default each color+shape starts with
+a different seeded Gaussian image, but this option reuses the same
+initial noise and random-number stream across all prompts, allowing
+a controlled *prompt-sensitivity* comparison. This changes evaluation
+seed policy; avoid directly comparing old and new aggregate metrics
+without noting that difference.
+
+### Test the existing trained model; NO retraining
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+CKPT="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+test -f "$CKPT" || { echo "Checkpoint not found"; false; }
+
+OUT="/tmp/sora-ancestral-shared-$(date +%s)"
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$CKPT" --sampler ancestral \
+  --guidance-scales 5 --seeds 42 --shared-noise \
+  --output-dir "$OUT"
+
+open "$OUT/guidance_5_seed_42/preview_grid.png"
+python3 -m scripts.pixel_diagnose \
+  --evaluation-dir "$OUT" \
+  --output "$OUT/ancestral_diagnosis.json"
+```
+
+The model still generates **24 actual RGB output PNGs** at 100
+diffusion steps; no synthetic rendering is used at inference.
+Results should be inspected visually for triangles, along with
+`shape_accuracy.triangle`. If no triangle improvement occurs,
+the next meaningful experiment is training-time **shape
+discrimination** with a controlled paired-caption objective,
+not a blind increase in steps or sampling guidance.
