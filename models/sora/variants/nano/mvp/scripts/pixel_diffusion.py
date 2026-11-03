@@ -24,6 +24,7 @@ from src.pixel_diffusion import (
 from src.pixel_dataset_v2 import (
     CONCEPTS as CONCEPTS_V2, caption_v2, balanced_training_batch,
 )
+from src.pixel_shape_contrast import matched_shape_batch, matched_shape_objective
 
 PROMPTS = [
     ("red circle", "دائرة حمراء"), ("green circle", "دائرة خضراء"),
@@ -179,12 +180,23 @@ def train(args):
     triangle_fraction = getattr(args, "triangle_fraction", None)
     conditioning = getattr(args,"conditioning","pooled")
     silhouette_weight = getattr(args,"silhouette_weight",0.15)
+    paired_shape_weight = getattr(args,"paired_shape_weight",0.0)
+    paired_shape_pairs = getattr(args,"paired_shape_pairs",4)
+    paired_silhouette_weight = getattr(args,"paired_silhouette_weight",0.5)
     if conditioning not in ("pooled","spatial"):
         raise ValueError("conditioning must be pooled or spatial")
     if conditioning=="spatial" and args.dataset_version!="v2":
         raise ValueError("Spatial text architecture is only supported for dataset v2")
     if not 0 <= silhouette_weight <= 2:
         raise ValueError("silhouette_weight must be between 0 and 2")
+    if not 0 <= paired_shape_weight <= 2:
+        raise ValueError("paired_shape_weight must be between 0 and 2")
+    if not 0 <= paired_silhouette_weight <= 2:
+        raise ValueError("paired_silhouette_weight must be between 0 and 2")
+    if paired_shape_pairs < 1:
+        raise ValueError("paired_shape_pairs must be positive")
+    if paired_shape_weight > 0 and (conditioning!="spatial" or args.dataset_version!="v2"):
+        raise ValueError("Matched counterfactual shape loss requires spatial v2 architecture")
     if init_v1 and init_v2:
         raise ValueError("Cannot initialize from both v1 and v2")
     if triangle_fraction is not None and args.dataset_version != "v2":
@@ -242,6 +254,21 @@ def train(args):
             loss=training_loss(model,images,tokens,cfg_drop_prob=args.cfg_drop_prob)
             noise_value=float(loss.detach())
             silhouette_value=None
+        paired_log=None
+        if paired_shape_weight > 0:
+            pair_images,pair_tokens,_=matched_shape_batch(
+                step,paired_shape_pairs,args.seed,split="train"
+            )
+            pair_objectives=matched_shape_objective(
+                model,pair_images.to(args.device),pair_tokens.to(args.device),
+                silhouette_weight=paired_silhouette_weight
+            )
+            loss=loss+paired_shape_weight*pair_objectives["total_loss"]
+            paired_log={
+                "paired_shape_noise_mse":round(float(pair_objectives["pair_noise_mse"]),6),
+                "paired_shape_difference_loss":round(float(pair_objectives["pair_difference_loss"]),6),
+                "paired_shape_loss":round(float(pair_objectives["pair_shape_loss"]),6),
+            }
         if not torch.isfinite(loss): raise FloatingPointError("Non-finite image diffusion loss")
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(),1)
@@ -250,6 +277,9 @@ def train(args):
             report={"step":step,"noise_mse":round(noise_value,6)}
             if silhouette_value is not None:
                 report["silhouette_dice_loss"]=round(silhouette_value,6)
+                report["total_loss"]=round(float(loss.detach()),6)
+            if paired_log is not None:
+                report.update(paired_log)
                 report["total_loss"]=round(float(loss.detach()),6)
             print(json.dumps(report),flush=True)
     path=run/"checkpoint.pt"
@@ -261,6 +291,11 @@ def train(args):
         "warm_start":warm_start,
         "triangle_fraction":triangle_fraction,
         "silhouette_weight":silhouette_weight if conditioning=="spatial" else None,
+        "paired_shape_weight":paired_shape_weight,
+        "paired_shape_pairs":paired_shape_pairs if paired_shape_weight>0 else None,
+        "paired_silhouette_weight":(
+            paired_silhouette_weight if paired_shape_weight>0 else None
+        ),
         "model":{k:v.detach().cpu() for k,v in model.state_dict().items()},
         "seed":args.seed,"training_steps":args.steps,
         "training_distribution":(
@@ -353,6 +388,12 @@ def main():
                    help="Opt-in new per-pixel text attention architecture")
     t.add_argument("--silhouette-weight",type=float,default=0.15,
                    help="Spatial model training-only RGB silhouette Dice loss weight")
+    t.add_argument("--paired-shape-weight",type=float,default=0.0,
+                   help="Opt-in counterfactual square/triangle loss weight (spatial v2 only)")
+    t.add_argument("--paired-shape-pairs",type=int,default=4,
+                   help="Number of matched square/triangle pairs per step")
+    t.add_argument("--paired-silhouette-weight",type=float,default=0.5,
+                   help="Shape difference mask weight within paired objective")
     t.add_argument("--diffusion-steps",type=int,default=100)
     t.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     t.add_argument("--cpu-threads",type=int,default=2)
