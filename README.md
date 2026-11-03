@@ -103,3 +103,15 @@ python3 -m scripts.migrate_storage --apply --run-id pixel-20261103T065647Z-ee054
 No Sora release has been approved or published; only experimental artifacts
 are present on the training machine. Central releases are not produced just
 because training finished.
+
+
+## Sora Nano shape-first architecture experiment
+
+A separate neural **text-to-mask CVAE → mask-to-RGB appearance network**
+is available under `models/sora/variants/nano/mvp/`. It uses a
+new experimental run format and the same centralized BERHOT artifacts
+root. No trained shape-first weights or production release are
+committed to GitHub. Follow
+[the two-stage training and acceptance guide](models/sora/variants/nano/mvp/SHAPE_FIRST_V1.md)
+for Mac testing, a safe small pilot and the actual bilingual 24-image
+quality gate. The previous RGB DDPM checkpoint remains untouched.
