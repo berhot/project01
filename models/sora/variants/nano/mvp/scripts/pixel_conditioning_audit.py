@@ -17,6 +17,7 @@ import torch
 from torch.nn import functional as F
 
 from scripts.pixel_diffusion import load_model
+from src.storage_paths import sora_run
 from src.pixel_dataset_v2 import (
     COLORS, caption_v2, synthetic_example_v2, tokenize_v2, shape_curriculum,
 )
@@ -159,12 +160,12 @@ def main():
     p.add_argument("--seeds",type=int,nargs="+",default=[42,123])
     p.add_argument("--timesteps",type=int,nargs="+",default=[5,20,50,80])
     p.add_argument("--device",choices=("cpu","mps","cuda"),default="cpu")
-    p.add_argument("--output",required=True)
+    p.add_argument("--output",default=None)
     args=p.parse_args()
     model=load_model(args.checkpoint,args.device)
     report=conditioning_audit(model,tuple(args.seeds),tuple(args.timesteps))
     report["checkpoint"]=args.checkpoint
-    out=Path(args.output)
+    out=Path(args.output) if args.output else sora_run("conditioning-audit")/"report.json"
     out.parent.mkdir(parents=True,exist_ok=True)
     with out.open("x",encoding="utf-8") as fd:
         json.dump(report,fd,indent=2,ensure_ascii=False)
