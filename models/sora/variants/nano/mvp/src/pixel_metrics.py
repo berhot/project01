@@ -13,8 +13,10 @@ COLORS = ("red", "green", "blue")
 SHAPES = ("circle", "square")
 
 
-def analyze_image(image):
+def analyze_image(image, dataset_version="v1"):
     """Return an interpretable color/shape estimate, or 'unknown'."""
+    if dataset_version not in ("v1", "v2"):
+        raise ValueError("Unsupported metric dataset")
     if not isinstance(image, torch.Tensor) or image.shape != (3, 32, 32):
         raise ValueError("Expected [3,32,32] tensor")
     if not torch.isfinite(image).all():
@@ -39,21 +41,39 @@ def analyze_image(image):
     mean = rgb[mask].mean(dim=0)
     ordering = torch.argsort(mean, descending=True)
     dominant, second = int(ordering[0]), int(ordering[1])
-    if float(mean[dominant] - mean[second]) > 0.12:
-        result["color"] = ("red", "green", "blue")[dominant]
-    if 0.7 < width/height < 1.3 and fill >= 0.66:
-        result["shape"] = "square" if fill >= 0.88 else "circle"
+    if dataset_version == "v2":
+        r, g, b = [float(v) for v in mean]
+        if r > b + 0.2 and g > b + 0.2 and abs(r-g) < 0.35:
+            result["color"] = "yellow"
+        elif float(mean[dominant] - mean[second]) > 0.12:
+            result["color"] = ("red", "green", "blue")[dominant]
+        if 0.60 < width/height < 1.5 and fill >= 0.38:
+            if fill >= 0.88:
+                result["shape"] = "square"
+            elif fill >= 0.68:
+                result["shape"] = "circle"
+            else:
+                result["shape"] = "triangle"
+    else:
+        if float(mean[dominant] - mean[second]) > 0.12:
+            result["color"] = ("red", "green", "blue")[dominant]
+        if 0.7 < width/height < 1.3 and fill >= 0.66:
+            result["shape"] = "square" if fill >= 0.88 else "circle"
     return result
 
 
-def summarize(predictions):
+def summarize(predictions, dataset_version="v1"):
     """Summarize per-image correctness and paired Arabic/English consistency."""
+    if dataset_version not in ("v1", "v2"):
+        raise ValueError("Unsupported metric dataset")
     if not predictions:
         raise ValueError("Need at least one prediction")
     pairs = defaultdict(dict)
     color_correct = shape_correct = both_correct = 0
     for row in predictions:
-        if row["expected_color"] not in COLORS or row["expected_shape"] not in SHAPES:
+        expected_colors = COLORS if dataset_version == "v1" else COLORS + ("yellow",)
+        expected_shapes = SHAPES if dataset_version == "v1" else SHAPES + ("triangle",)
+        if row["expected_color"] not in expected_colors or row["expected_shape"] not in expected_shapes:
             raise ValueError("Invalid expected toy concept")
         if row["language"] not in ("ar", "en"):
             raise ValueError("Language must be ar or en")
@@ -90,4 +110,5 @@ def summarize(predictions):
         "bilingual_prediction_consistency": round(consistent/len(paired), 4) if paired else None,
         "bilingual_both_correct": round(both_correct_pairs/len(paired), 4) if paired else None,
         "metric_scope": "toy single-shape/color heuristics; not human visual validation",
+        "dataset_version": dataset_version,
     }
