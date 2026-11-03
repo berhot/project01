@@ -524,3 +524,68 @@ prints dominant-class counts, per-class confusion, EN/AR false agreement
 and same-seed image differences. It cannot establish human visual quality.
 Keep v1 and v2 checkpoints; wait to design the next training objective
 until the per-class failures and the galleries are inspected.
+
+## Targeted v2 recovery experiment: warm-start from successful v1 RGB weights
+
+**Why this experiment exists:** After 10,000 steps, dataset v2 generated
+largely red squares instead of triangles and correct colors; the diagnostic
+found one dominant class in 54.17% of images at CFG 7.5 and in 100%
+at CFG 1 and 3. The screenshot confirms these are not merely heuristic
+classification errors. v1 had achieved much stronger six-class control,
+so we can test whether **transferring learned v1 RGB denoising weights**
+helps rather than training v2 blindly from random initialization again.
+
+**This is a hypothesis, not a confirmed improvement.** The source is
+the user's actual v1 `rgb-unet-text-v1` checkpoint (32 channels, 100
+diffusion steps), not the v2 failed run or an external image model.
+All old U-Net layers and old word embeddings are transferred. New
+words `yellow`, `triangle`, `أصفر`, `صفراء`, `مثلث`, `light`,
+`فاتحة` receive initial vectors by averaging related v1 word vectors
+and then are fully trainable. This is a semantic initialization for
+new parameters, **not a hardcoded shape/color renderer**.
+Architecture/diffusion-step/vocabulary mismatches are rejected.
+
+**Your old checkpoints stay in place.** A new run gets its own timestamped
+checkpoint, and metadata records the v1 source checkpoint. Nothing is
+merged into another model family. Image generation still starts from
+Gaussian RGB noise and uses learned U-Net weights.
+
+### Run only a short smoke test first
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+# Lists checkpoint versions and training steps without changing anything.
+python3 -m scripts.pixel_checkpoints list
+
+# Pick the trained 10k-step v1 RGB checkpoint; never use failed v2 as source.
+V1=$(python3 -m scripts.pixel_checkpoints latest \
+  --dataset-version v1 --min-steps 10000)
+echo "Source v1: $V1"
+test -f "$V1"
+
+python3 -m scripts.pixel_diffusion train \
+  --dataset-version v2 --init-from-v1 "$V1" \
+  --steps 100 --batch-size 12 \
+  --base-channels 32 --diffusion-steps 100 \
+  --cfg-drop-prob 0.15 --learning-rate 0.0001 \
+  --device cpu --cpu-threads 2
+```
+
+**If the tests and short smoke run pass**, the independent research trial
+(not a production release) is **2,500 steps**, with identical hyperparameters
+except `--steps 2500`. Compare at least two seeds and guidance scales 5 and
+7.5. Record whether the new model improves the failed v2's 25% prompt
+accuracy **on the same 12-class test**, and compare actual 24-image grids.
+If there is no improvement, stop rather than automatically increasing
+to 10,000+ steps. The old v1-v2 comparisons are *not* the same task;
+the new v2-to-v2 comparison is.
+
+If warm-start does not fix missing triangles, investigate a stronger spatial
+shape-conditioning design, color/shape auxiliary objectives and time-dependent
+prompt sensitivity before spending more training compute. The RGB diffusion
+architecture and existing v1/v2 baselines are preserved independently.
