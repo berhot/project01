@@ -1273,3 +1273,69 @@ squares or color accuracy, keep the original fixed sampler.
 No more training is warranted by these diagnostics alone.
 
 **New test code is committed but has not yet run on the Mac.**
+
+## After dynamic clipping: inspect actual triangle recovery instead of sampler tuning
+
+On the user's Mac, **87/87 tests passed** and the same spatial-v2
+800-step checkpoint produced these CFG-5 seed-42 results:
+
+| | Fixed | Dynamic thresholding |
+|---|---:|---:|
+| Color accuracy | 100.00% | 95.83% |
+| Shape accuracy | 66.67% | 58.33% |
+| Strict prompt accuracy | 66.67% | 54.17% |
+| Bilingual both correct | 66.67% | 50.00% |
+
+**Keep fixed clipping.** These aggregate scores do NOT provide
+per-triangle accuracy in dynamic mode, so do not falsely claim a
+specific triangle hit rate without the saved per-shape diagnostic.
+
+### No-training next step: held-out geometry reconstruction
+
+`scripts.pixel_geometry_audit` compares reconstruction of 32×32
+held-out **real triangle/square training-target images** at selected
+diffusion timesteps. Given the same ordinarily forward-noised x_t,
+the trained model predicts RGB noise twice: once with the correct
+English/Arabic shape word and once with that word swapped. It
+reconstructs an x0 and compares the predicted foreground
+silhouette directly to the actual validation image. Metrics are
+mask IoU, foreground area, shape heuristic and how much using the
+correct shape word helps. This is NOT a pure-noise generative-image
+score and cannot certify triangle generation.
+
+The aim is to distinguish whether the RGB denoiser already fails
+to recover triangle geometry from normal q(x_t|x0) inputs, versus
+primarily failing when its reverse trajectory begins from Gaussian
+noise. It performs NO training, writes no checkpoint and introduces
+no hardcoded shapes during generation.
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+
+python3 -m unittest discover -s tests -v
+
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+test -f "$BASE" || { echo "Missing baseline"; false; }
+
+python3 -m scripts.pixel_geometry_audit \
+  --checkpoint "$BASE" \
+  --guidance-scale 5 --seeds 42 123 \
+  --timesteps 5 20 50 80 \
+  --output /tmp/sora-base-geometry-audit-20261103.json
+```
+
+Also inspect the **already generated** dynamic-clipping images by
+shape to discover whether any triangles succeeded:
+
+```bash
+python3 -m scripts.pixel_diagnose \
+  --evaluation-dir /tmp/sora-x0-ablation-1793713617-dynamic \
+  --output /tmp/sora-dynamic-shape-diagnosis-20261103.json
+```
+
+The new geometry-audit tests are committed but have **not yet
+been executed on the user's Mac**. Do not run another long training
+trial until these shape-specific results are available.
