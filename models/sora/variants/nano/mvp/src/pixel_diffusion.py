@@ -290,17 +290,41 @@ def shape_aware_training_objective(model,images,tokens,cfg_drop_prob=0.15,
             "silhouette_loss":silhouette_loss.detach()}
 
 
+def clip_predicted_x0(x0,policy="fixed"):
+    """Optional inference-only clipping policy.
+
+    'fixed': historical clipping to [-1,1], unchanged.
+    'dynamic': samplewise 99.5th percentile dynamic thresholding.
+    Both produce bounded x0; dynamic retains more relative contrast
+    when nearly all estimated x0 values are out of bounds at high noise.
+    This is a sampling hypothesis, not a learned geometry guarantee.
+    """
+    if policy=="fixed":
+        return x0.clamp(-1,1)
+    if policy=="dynamic":
+        if x0.ndim!=4 or x0.shape[1:]!=(3,32,32):
+            raise ValueError("Dynamic clipping expects [B,3,32,32] RGB")
+        bound=torch.quantile(
+            x0.detach().abs().flatten(1).float(),0.995,dim=1
+        ).clamp(min=1).to(dtype=x0.dtype).view(-1,1,1,1)
+        return x0.clamp(-bound,bound)/bound
+    raise ValueError("Unsupported x0 clipping policy")
+
+
 @torch.no_grad()
-def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mean",guidance_scale=1.0):
+def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mean",guidance_scale=1.0,x0_clipping="fixed"):
     """Generate pixels from learned diffusion.
 
     'posterior_mean': full-step reverse posterior mean without noise.
     'ancestral': full-step stochastic DDPM posterior sampling, with learned
     RGB-noise prediction, standard posterior variance and x0 clipping.
     'ddim': deterministic DDIM with optional timestep skipping.
+    x0_clipping: fixed (historical) or dynamic (inference-only ablation).
     """
     if not math.isfinite(guidance_scale) or not 0 <= guidance_scale <= 20:
         raise ValueError("guidance_scale must be between 0 and 20")
+    if x0_clipping not in ("fixed","dynamic"):
+        raise ValueError("x0_clipping must be fixed or dynamic")
     total=model.config.diffusion_steps
     if sampler not in ("posterior_mean","ancestral","ddim"):
         raise ValueError("Unsupported diffusion sampler")
@@ -322,7 +346,7 @@ def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mea
         for t in range(total-1,-1,-1):
             eps=guided_noise(model,x,torch.tensor([t],device=device,dtype=torch.long),tokens,guidance_scale)
             a=cum[t]
-            x0=((x-(1-a).sqrt()*eps)/a.sqrt()).clamp(-1,1)
+            x0=clip_predicted_x0((x-(1-a).sqrt()*eps)/a.sqrt(),x0_clipping)
             if t==0: x=x0
             else:
                 prev=cum[t-1]
@@ -340,7 +364,7 @@ def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mea
         for i,t in enumerate(timesteps.tolist()):
             eps=guided_noise(model,x,torch.tensor([t],device=device,dtype=torch.long),tokens,guidance_scale)
             a=cum[t]
-            x0=((x-(1-a).sqrt()*eps)/a.sqrt()).clamp(-1,1)
+            x0=clip_predicted_x0((x-(1-a).sqrt()*eps)/a.sqrt(),x0_clipping)
             if i+1==len(timesteps): x=x0
             else:
                 prev=cum[timesteps[i+1].item()]
