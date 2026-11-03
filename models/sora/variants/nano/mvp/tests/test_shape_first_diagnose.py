@@ -3,6 +3,7 @@ import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import torch
 
@@ -10,7 +11,6 @@ from src.pixel_dataset_v2 import synthetic_example_v2
 from src.shape_first import mask_from_rgb
 from scripts.shape_first_diagnose import score_binary_mask,diagnose
 from scripts.shape_first import train
-from tests.test_shape_first import ShapeFirstModelTests
 
 
 class ShapeFirstDiagnosisTests(unittest.TestCase):
@@ -47,8 +47,14 @@ class ShapeFirstDiagnosisTests(unittest.TestCase):
     def test_existing_checkpoint_readonly_diagnostic_breakdown(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
-            example=ShapeFirstModelTests()
-            run=train(example.args(root/"runs"))
+            args=SimpleNamespace(
+                mask_steps=2,rgb_steps=2,batch_size=12,
+                mask_width=16,rgb_width=16,text_dim=24,latent_dim=4,
+                learning_rate=0.0005,beta=0.01,paired_weight=0.5,
+                paired_layout_count=1,seed=42,cpu_threads=1,log_every=1,
+                device="cpu",output_root=str(root/"runs"),
+            )
+            run=train(args)
             original={p.name:hashlib.sha256(p.read_bytes()).hexdigest()
                       for p in (run/"mask.pt",run/"appearance.pt",run/"run.json")}
             result=diagnose(run,seed=42)
