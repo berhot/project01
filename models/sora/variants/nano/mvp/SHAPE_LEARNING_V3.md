@@ -163,3 +163,75 @@ improvements; never automatically publish to `storage/releases`.
 - No external image models, procedural shape output, or fabricated
   evaluation scores are allowed.
 - PR #10 stays draft; GitHub Actions stays manual-only.
+
+## Final V3 pilot results — 2026-11-03 (REJECTED)
+
+The user's Mac ran the full **111-test suite successfully** and
+completed one 20-step, teacher-preserved high-noise shape V3 pilot.
+Candidate model:
+
+`storage/artifacts/sora/nano/mvp/pixel-20261103T192801Z-8ec216d1/checkpoint.pt`
+
+Original baseline model (keep as preferred checkpoint):
+
+`storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt`
+
+Real 24-prompt bilingual RGB galleries, **seed 42, CFG 5, fixed
+clipping, posterior-mean, matched concept seeds**, stored in the
+user's central BERHOT storage:
+
+- Baseline: `v3-baseline-20261103T223204/guidance_5_seed_42/`
+- V3: `v3-candidate-20261103T223204/guidance_5_seed_42/`
+- Strict quality JSON:
+  `shape-quality-20261103T193340Z-d44b9203/report.json`
+
+**Legacy heuristic: NO IMPROVEMENT.** Both models: color accuracy
+1.0, shape accuracy 0.6667, strict concept/prompt accuracy by the
+old classifier 0.6667, bilingual both-correct 0.6667, triangle
+recognition 0/8. The old classifier again counted all circles as
+correct, despite the user's visual complaint of angular circles.
+
+**New geometry scorer: candidate REGRESSED.**
+
+| Quality metric | Baseline | V3 |
+| --- | ---: | ---: |
+| Circle geometry pass | **4/8** | **3/8** |
+| Mean circle ideal-mask IoU | 0.92202 | 0.92004 |
+| Square geometry pass | 7/8 | 7/8 |
+| Mean square ideal-mask IoU | 0.94825 | 0.95153 |
+| Triangle geometry pass | **0/8** | **0/8** |
+| Mean triangle ideal-mask IoU | 0.51854 | 0.51846 |
+| Strict prompt accuracy (geometry + color) | **0.4583** | **0.4167** |
+| Color accuracy | 1.0 | 1.0 |
+
+`scripts.pixel_shape_quality` returned
+`eligible_for_human_review=false` because circles regressed,
+triangles remained absent, and strict prompt accuracy fell.
+`scripts.pixel_quality_gate` independently returned
+`accepted_by_toy_gate=false`, with
+`triangle_recognizable_heuristic=false`.
+
+The 20-step training logs did improve batch-local geometry and
+shape-word discriminability on known forward-noised images, but
+**those losses did not translate into sampling quality**.
+Never label this pilot successful on the basis of train loss,
+shape-word win rate, or passing unit tests.
+
+**Disposition: reject V3 checkpoint promotion, stop training V3
+recipe, preserve both checkpoints and saved galleries, do not
+package or publish `storage/releases/sora`.** PR stays draft.
+
+### Research direction after V3 failure
+
+A different *learned* generative architecture is needed to tackle
+high-noise mask/shape formation explicitly. Do not keep increasing
+the number of short epsilon-space shape-word fine-tunes with the
+same inherited square-biased checkpoint. Consider a distinct
+**text-conditioned, learned shape/mask-generation stage followed
+by a trained image appearance stage** as a new experimental
+checkpoint family. Both stages must learn from pixels/masks in
+training; never draw template shapes procedurally in inference.
+Evaluate that approach from random noise for all 12 concepts
+and 2 languages against the same strict silhouette and color
+metrics, retaining the original 800-step RGB model as baseline.
+Any alternate architecture is hypothesis, not a proven fix.
