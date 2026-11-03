@@ -1158,3 +1158,57 @@ blindly adding more training steps.
 
 New tests are committed but have **not been run on the Mac**.
 The earlier 800-step spatial checkpoint remains the best toy baseline.
+
+### Reverse denoising trace: where does triangle geometry disappear?
+
+The latest ordinary-forward-q(x_t) audit shows **some correct
+square/triangle prompt separation** but worse correctness at high
+noise (baseline correct-prompt win rate 90.62% at t=5/20 vs
+68.75% at t=50 and 62.5% at t=80, across both shapes combined).
+The safe 20-step run does not meaningfully improve this conditioning.
+Ground-truth triangle images occupy only 52.2% of their bounding
+boxes versus 100% for squares, so training labels do contain the
+necessary geometry.
+
+To observe actual generation dynamics, `scripts.pixel_reverse_trace`
+runs **real learned posterior-mean RGB reverse diffusion** twice
+using identical Gaussian starting pixels and a square or triangle
+prompt of the same color/language. At selected timesteps it logs
+the prompt-only denoiser epsilon difference on the same input,
+RGB trajectory differences, foreground-mask IoU, shape heuristics
+and x0 clipping, while exporting the actual learned intermediate
+x0 RGB images in `reverse_trace.png`.
+
+This tool does not draw shape templates, write weights, or train.
+Its final outputs are checked against the established
+`src.pixel_diffusion.generate` sampler in new regression tests.
+The code and tests have been committed; **the new Mac test results
+are not yet available**.
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+
+python3 -m unittest discover -s tests -v
+
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+test -f "$BASE" || { echo "Baseline checkpoint not found"; false; }
+OUT="/tmp/sora-reverse-trace-$(date +%s)"
+
+python3 -m scripts.pixel_reverse_trace \
+  --checkpoint "$BASE" --color red --language en \
+  --seed 42 --guidance-scale 5 --cpu-threads 2 \
+  --output-dir "$OUT"
+
+open "$OUT/reverse_trace.png"
+```
+
+The exported `report.json` distinguishes same-input word effects
+from cumulative differences between independent reverse paths.
+Intermediate `x0` estimates can be badly clipped at high noise,
+so heuristic shape labels at early timesteps **do not establish
+correctness**. Compare late-stage silhouettes and the final images
+to determine if the triangle semantics disappear in reverse sampling.
+Run **no further training** pending this analysis.
