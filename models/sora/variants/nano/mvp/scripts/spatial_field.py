@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw
 import torch
 
 from src.model import CAPTIONS, caption_id, synthetic_image
+from src.storage_paths import sora_run
 from src.spatial_field import (
     SpatialConfig, SpatialField, synthetic_batch, spatial_loss, render, save_field_png
 )
@@ -44,10 +45,7 @@ def train(args):
     cfg = SpatialConfig(hidden=args.hidden, embedding_dim=args.embedding_dim)
     model = SpatialField(cfg).to(args.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    run = Path(args.output_root) / (
-        "spatial-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-        + "-" + uuid.uuid4().hex[:8]
-    )
+    run = sora_run("spatial",getattr(args,"output_root",None))
     run.mkdir(parents=True, exist_ok=False)
     for step in range(1, args.steps + 1):
         # Balanced class IDs, with varied positions/sizes on each step.
@@ -150,7 +148,8 @@ def main():
     p.add_argument("--embedding-dim", type=int, default=8)
     p.add_argument("--device", choices=("cpu", "mps", "cuda"), default="cpu")
     p.add_argument("--cpu-threads", type=int, default=2)
-    p.add_argument("--output-root", default="storage/artifacts/sora/nano/mvp")
+    p.add_argument("--output-root", default=None,
+                   help="Default: BERHOT/storage/artifacts/sora/nano/mvp")
     p = sub.add_parser("evaluate")
     p.add_argument("--checkpoint", required=True)
     p.add_argument("--output-dir", required=True)
