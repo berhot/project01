@@ -116,12 +116,12 @@ def main():
     sampling = sub.add_parser("sample")
     sampling.add_argument("--checkpoint", required=True)
     sampling.add_argument("--prompt", required=True)
-    sampling.add_argument("--output", required=True)
+    sampling.add_argument("--output", default=None)
     sampling.add_argument("--seed", type=int, default=42)
     sampling.add_argument("--device", choices=("cpu", "mps", "cuda"), default="cpu")
     evaluation = sub.add_parser("evaluate")
     evaluation.add_argument("--checkpoint", required=True)
-    evaluation.add_argument("--output-dir", required=True)
+    evaluation.add_argument("--output-dir", default=None)
     evaluation.add_argument("--seed", type=int, default=42)
     evaluation.add_argument("--device", choices=("cpu", "mps", "cuda"), default="cpu")
     args = parser.parse_args()
@@ -129,11 +129,13 @@ def main():
         train(args)
     elif args.action == "sample":
         model = restore(args.checkpoint, args.device)
-        save_rgb_png(generate(model, caption_id(args.prompt), args.seed, args.device), args.output)
-        print(json.dumps({"output": args.output, "prompt": args.prompt}))
+        output=Path(args.output) if args.output else sora_run("cvae-sample")/"sample.png"
+        output.parent.mkdir(parents=True,exist_ok=True)
+        save_rgb_png(generate(model, caption_id(args.prompt), args.seed, args.device), output)
+        print(json.dumps({"output": str(output), "prompt": args.prompt}))
     else:
         model = restore(args.checkpoint, args.device)
-        print(json.dumps({"preview_grid": str(evaluate(model, args.output_dir, args.seed))}))
+        print(json.dumps({"preview_grid": str(evaluate(model, args.output_dir or sora_run("cvae-eval"), args.seed))}))
 
 
 if __name__ == "__main__":
