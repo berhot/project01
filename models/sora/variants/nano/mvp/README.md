@@ -973,3 +973,93 @@ benchmark. It will answer whether a short paired run improved the
 predicted shape response and, more importantly, whether recognizable
 triangles appear in the 24 generated images. Do not extend to 300+
 steps without comparing the new images and per-shape breakdown.
+
+## Failed paired shape loss: protect old concepts before any further training
+
+A 50-step `--paired-shape-weight 0.35` run did **not** learn triangles.
+Its matched-noise probe strengthened (RMS ratio 0.0893→0.5922,
+alignment -0.0096→0.6340), but the **real generated images regressed**:
+circles 100%→0%, color 100%→62.5%, strict prompt 66.67%→29.17%.
+Triangles remained **0%**. The user's contact sheet confirms this.
+Do not use the paired 50-step checkpoint as the best model. Do not
+train it longer or replace earlier checkpoints.
+
+### Experimental safeguard: frozen teacher and low-weight pair objective
+
+The optional `--preserve-weight` invokes a **frozen copy** of the
+original trained spatial-v2 model as a teacher during fine-tuning.
+Both student and teacher predict noise from the **same ordinary
+forward-noised RGB images** of circles and squares. The teacher
+loss protects both conditional and *null classifier-free guidance*
+predictions. A separate paired square/triangle loss is still allowed,
+but at a much lower weight of **0.02**, not 0.35.
+
+The objective does NOT guarantee triangle generation, and preserving
+the teacher can limit new learning. The teacher checkpoint and all
+other existing files stay unchanged. Both teacher and paired losses
+default to zero and cannot affect legacy training unless enabled.
+
+### First: run all tests
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+```
+
+### Only after tests pass: optional **20-step** safety experiment
+
+```bash
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+test -f "$BASE" || { echo "Proven spatial baseline missing"; false; }
+
+LOG="/tmp/sora-teacher-20-$(date +%s).log"
+python3 -m scripts.pixel_diffusion train \
+  --dataset-version v2 --conditioning spatial \
+  --init-from-v2 "$BASE" \
+  --triangle-fraction 0.50 \
+  --paired-shape-weight 0.02 --paired-shape-pairs 4 \
+  --paired-silhouette-weight 0.50 \
+  --preserve-weight 1.0 --preserve-null-weight 0.50 \
+  --silhouette-weight 0.15 \
+  --steps 20 --log-every 10 --batch-size 12 \
+  --base-channels 32 --diffusion-steps 100 \
+  --cfg-drop-prob 0.15 --learning-rate 0.00002 \
+  --device cpu --cpu-threads 2 | tee "$LOG"
+
+CKPT=$(tail -n 1 "$LOG" | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["checkpoint"])')
+test -f "$CKPT" || { echo "New checkpoint missing"; false; }
+```
+
+### Compare actual generated images with identical prompts/seeds
+
+```bash
+REVIEW="/tmp/sora-teacher-gate-$(date +%s)"
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$BASE" --sampler posterior_mean \
+  --guidance-scales 5 --seeds 42 --output-dir "$REVIEW/base"
+
+python3 -m scripts.pixel_metrics \
+  --checkpoint "$CKPT" --sampler posterior_mean \
+  --guidance-scales 5 --seeds 42 --output-dir "$REVIEW/candidate"
+
+python3 -m scripts.pixel_quality_gate \
+  --baseline-report "$REVIEW/base/guidance_5_seed_42/report.json" \
+  --candidate-report "$REVIEW/candidate/guidance_5_seed_42/report.json"
+
+open "$REVIEW/candidate/guidance_5_seed_42/preview_grid.png"
+```
+
+The quality gate exits with status 2 when a candidate fails. It rejects
+an image-quality regression even if its shape-response probe improves.
+The gate only uses toy segmentation/label heuristics and **never**
+certifies human visual quality. Inspect all 24 images and their
+Arabic/English labels before accepting. If triangles remain 0%
+or old classes regress, **stop** and investigate the training
+distribution/objective instead of increasing the run length.
+
+This model remains an experimental 32×32, 12-class synthetic RGB
+diffusion MVP, not open-domain Arabic/English image generation.
