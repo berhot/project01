@@ -30,6 +30,9 @@ from src.shape_field_v2 import (
     geometry_objective,color_objective,generate
 )
 from src.storage_paths import sora_run
+from src.shape_field_v21 import (
+    matched_layout_shape_batch,shape_word_separation_objective
+)
 
 MASK_KIND="sora-implicit-shape-field-v2"
 COLOR_KIND="sora-neural-colorizer-v2"
@@ -99,6 +102,16 @@ def train(args):
             args.log_every<1 or args.cpu_threads<1 or
             not math.isfinite(args.learning_rate) or args.learning_rate<=0):
         raise ValueError("Invalid shape-field training arguments")
+    v21=getattr(args,"shape_v21",False)
+    pair_weight=getattr(args,"pair_weight",1.0)
+    rank_weight=getattr(args,"rank_weight",0.1)
+    rank_margin=getattr(args,"rank_margin",0.03)
+    pair_examples=getattr(args,"paired_layout_count",4)
+    if v21 and (not all(math.isfinite(x) for x in (
+            pair_weight,rank_weight,rank_margin))
+            or not 0<pair_weight<=2 or not 0<=rank_weight<=1
+            or not 0<=rank_margin<=1 or not 1<=pair_examples<=32):
+        raise ValueError("Invalid separate V2.1 paired-shape training recipe")
     cfg=ShapeFieldConfig(hidden=args.hidden,word_dim=args.word_dim)
     if args.device=="cpu":
         torch.set_num_threads(args.cpu_threads)
@@ -108,7 +121,7 @@ def train(args):
     shape=NeuralMaskField(cfg).to(args.device)
     color=NeuralColorizer(cfg).to(args.device)
     # Only a NEW dedicated path; NEVER load/copy V1, V3 or DDPM weights.
-    run=sora_run("shape-field-v2",args.output_root)
+    run=sora_run("shape-field-v21" if v21 else "shape-field-v2",args.output_root)
     run.mkdir(parents=True,exist_ok=False)
     try:
         optimizer=torch.optim.AdamW(shape.parameters(),lr=args.learning_rate)
@@ -118,19 +131,40 @@ def train(args):
             shape.train()
             optimizer.zero_grad(set_to_none=True)
             loss=geometry_objective(shape,images,tokens)
-            if not torch.isfinite(loss["loss"]):
+            paired=None
+            total=loss["loss"]
+            if v21:
+                pair_layouts,pair_masks,pair_tokens,_=matched_layout_shape_batch(
+                    step,pair_examples,args.seed,args.device
+                )
+                paired=shape_word_separation_objective(
+                    shape,pair_layouts,pair_masks,pair_tokens,
+                    ranking_margin=rank_margin,ranking_weight=rank_weight
+                )
+                total=total+pair_weight*paired["loss"]
+            if not torch.isfinite(total):
                 raise FloatingPointError("Nonfinite neural geometry loss")
-            loss["loss"].backward()
+            total.backward()
             torch.nn.utils.clip_grad_norm_(shape.parameters(),1.0)
             optimizer.step()
             if step==1 or step%args.log_every==0 or step==args.mask_steps:
-                print(json.dumps({
+                report={
                     "stage":"neural-shape-field","step":step,
-                    "total_loss":round(float(loss["loss"].detach()),6),
-                    "bce":round(float(loss["bce"]),6),
-                    "dice_loss":round(float(loss["dice_loss"]),6),
+                    "total_loss":round(float(total.detach()),6),
+                    "ordinary_bce":round(float(loss["bce"]),6),
+                    "ordinary_dice_loss":round(float(loss["dice_loss"]),6),
                     "mask_probability_mean":round(float(loss["mask_mean"]),6)
-                }),flush=True)
+                }
+                if paired is not None:
+                    report.update({
+                        "paired_reconstruction_loss":round(float(paired["reconstruction_loss"]),6),
+                        "shape_word_rank_loss":round(float(paired["shape_rank_loss"]),6),
+                        "correct_shape_word_win_rate":round(float(
+                            paired["correct_shape_word_win_rate"]),4),
+                        "correct_vs_wrong_word_bce_advantage":round(float(
+                            paired["correct_vs_wrong_word_bce_advantage"]),6)
+                    })
+                print(json.dumps(report),flush=True)
         _save_weight(run/"mask_field.pt",shape,MASK_KIND,args.mask_steps,args.seed)
         optimizer=torch.optim.AdamW(color.parameters(),lr=args.learning_rate)
         for step in range(1,args.color_steps+1):
@@ -162,6 +196,14 @@ def train(args):
             "mask_steps":args.mask_steps,"color_steps":args.color_steps,
             "batch_size":args.batch_size,"learning_rate":args.learning_rate,
             "seed":args.seed,
+            "training_recipe":("shape-word-matched-layout-v2.1" if v21 else "original-v2"),
+            "paired_shape_objective":({
+                "pair_weight":pair_weight,
+                "rank_weight":rank_weight,
+                "rank_margin":rank_margin,
+                "paired_layout_count":pair_examples,
+                "reconstruction":"same layout with 3 different target shapes x 2 languages",
+            } if v21 else None),
             "sha256":{
                 "mask_field.pt":checksum(run/"mask_field.pt"),
                 "colorizer.pt":checksum(run/"colorizer.pt")
@@ -324,6 +366,12 @@ def main():
     tr.add_argument("--cpu-threads",type=int,default=2)
     tr.add_argument("--log-every",type=int,default=20)
     tr.add_argument("--output-root",default=None)
+    tr.add_argument("--shape-v21",action="store_true",
+                    help="Opt-in V2.1 same-layout 3-shape bilingual supervision; stores a SEPARATE run")
+    tr.add_argument("--pair-weight",type=float,default=1.0)
+    tr.add_argument("--rank-weight",type=float,default=0.1)
+    tr.add_argument("--rank-margin",type=float,default=0.03)
+    tr.add_argument("--paired-layout-count",type=int,default=4)
     ev=commands.add_parser("evaluate")
     ev.add_argument("--run-dir",required=True)
     ev.add_argument("--seed",type=int,default=42)
