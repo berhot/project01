@@ -523,3 +523,65 @@ Expected outcome: print a valid JSON decision,
 `accepted_by_toy_gate: false`, because triangles remain 0%; exit
 status **2** is an intentional gate rejection, not an exception.
 All original checkpoints remain in place and PR #10 stays draft.
+
+## 74 passing tests, gate correctly rejects preserved-but-nontriangular run
+
+The user reran the updated Mac tests: **74/74 passed**. After the
+legacy shared-noise metadata fix, the strict toy quality gate returned
+valid JSON with `accepted_by_toy_gate: false`:
+- Circle, square and color preservation checks all passed.
+- Overall prompt accuracy was unchanged at **0.6667**.
+- **Triangle accuracy remained 0.0** in both baseline and 20-step
+  frozen-teacher candidate.
+
+The model therefore **must not be promoted**. Its preservation
+result is still useful as a separate research checkpoint.
+
+### Next read-only diagnosis: actual forward-DDPM shape-word sensitivity
+
+Inspection of `src/pixel_dataset_v2.py` confirms that triangle training
+targets are actual PIL-filled three-vertex polygons; triangle labels
+and tokens exist in both Arabic and English. This alone cannot
+establish that the model learned them.
+
+New `scripts.pixel_conditioning_audit` avoids the unnatural
+midpoint-noise paired objective. It uses **ordinary held-out forward
+diffusion** on actual square/triangle validation images:
+- Keep the SAME RGB x_t, timestep, color and noise epsilon.
+- Predict noise with the correct shape word and the swapped word
+  (square vs triangle; مربع vs مثلث).
+- Report mean MSE advantage of the *correct* prompt, fraction of
+  comparisons in which it wins, and model response RMS.
+- Cover 4 colors, 2 languages, 2 target shapes, 2 seeds and 4
+  timesteps = **128 evaluations**.
+- Check actual training-target geometry via foreground fill ratio;
+  triangles should occupy much less of their bounding box than squares.
+
+This is diagnostic ONLY. It loads the existing trained checkpoints and
+does not train, save weights or call any procedural renderer during
+inference. A high correct-prompt win rate does not guarantee good
+generated images, but a near-zero/negative advantage would reveal
+a conditioning weakness on an ordinary diffusion input.
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+SAFE="storage/artifacts/sora/nano/mvp/pixel-20261103T131058Z-65110681/checkpoint.pt"
+
+python3 -m scripts.pixel_conditioning_audit \
+  --checkpoint "$BASE" \
+  --output /tmp/sora-conditioning-base-42-123.json
+python3 -m scripts.pixel_conditioning_audit \
+  --checkpoint "$SAFE" \
+  --output /tmp/sora-conditioning-safe-42-123.json
+```
+
+**Do not launch another long training run** until the per-shape
+correct-vs-swapped conditioning result explains which timestep,
+language or shape fails. The 32×32 synthetic model is not yet a
+general bilingual image generator.
