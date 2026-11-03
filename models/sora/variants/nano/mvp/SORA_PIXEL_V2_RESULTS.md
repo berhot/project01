@@ -741,3 +741,86 @@ Changes include five new regression tests for fixed-default
 reproducibility, dynamic bounded output and seed determinism, exported
 policy metadata, and legacy quality-gate handling. Those new tests
 must pass on the Mac before trusting the results.
+
+
+## 87 passed, dynamic x0 clipping degraded scores (2026-11-03)
+
+User's Mac passed **87/87 tests** and ran the same trained spatial-v2
+800-step checkpoint, 24 fixed prompts (AR+EN), seed 42, CFG 5,
+posterior-mean reverse diffusion with `fixed` vs `dynamic` x0
+clipping. Results:
+
+| Metric | Fixed x0 | Dynamic x0 |
+|---|---:|---:|
+| Color accuracy | **100.00%** | 95.83% |
+| Shape accuracy | **66.67%** | 58.33% |
+| Strict prompt accuracy | **66.67%** | 54.17% |
+| Bilingual both correct | **66.67%** | 50.00% |
+| Bilingual prediction consistency | **100.00%** | 91.67% |
+
+Saved Mac evaluation folders:
+- `/tmp/sora-x0-ablation-1793713617-fixed`
+- `/tmp/sora-x0-ablation-1793713617-dynamic`
+
+Dynamic thresholding is **rejected as default** because the strict
+prompt score fell by 12.5 percentage points. No per-shape diagnostic
+or updated screenshots for these two policies were provided yet,
+so we do NOT claim its triangle-specific accuracy from aggregates.
+The earlier baseline, with fixed clipping, has 0% triangles.
+
+Keep the existing fixed posterior-mean sampler and the good spatial
+checkpoint. **Do not spend further training compute tweaking clip
+thresholds** based on these findings.
+
+### New read-only held-out RGB geometry-reconstruction audit
+
+The remaining question is whether a trained denoiser can reconstruct
+the actual triangular *foreground mask* when given an ordinarily
+forward-noised **real triangle target** at t=5,20,50,80, or whether
+its output resembles a square even when the input x_t contains a
+triangle. This distinguishes model geometry capacity from generation
+trajectory failure.
+
+New `scripts.pixel_geometry_audit` loads the existing checkpoint
+and constructs held-out v2 images with known masks. It uses exactly
+one Gaussian epsilon for two conditions:
+- Correct text (e.g. `red triangle`, `مثلث أحمر`)
+- Swapped text (e.g. `red square`, `مربع أحمر`)
+both evaluated on the **same x_t**, with CFG 5 and historical fixed
+x0 clipping. It reports foreground-mask IoU to ground truth, area
+ratio, difference from wrong-shape caption, and predicted class,
+broken out by shape, language and timestep. The inference output
+remains learned RGB noise prediction; synthetic images are *held-out
+ground truth*, not copied into generated samples.
+
+Default `seeds 42 123` and `timesteps 5 20 50 80` cover 128
+held-out cases. New unit tests cover mask math, bilingual target
+coverage, reproducibility, config rejection, and that the audit
+does not mutate any weights. **New tests not yet Mac-verified.**
+This script performs no model training and writes only a JSON report.
+
+```bash
+cd /Users/farisalsaiari/Desktop/BERHOT
+git switch feat/sora-nano
+git pull --ff-only
+cd models/sora/variants/nano/mvp
+python3 -m unittest discover -s tests -v
+
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+python3 -m scripts.pixel_geometry_audit \
+  --checkpoint "$BASE" --output /tmp/sora-base-geometry-audit-20261103.json
+
+python3 -m scripts.pixel_diagnose \
+  --evaluation-dir /tmp/sora-x0-ablation-1793713617-dynamic \
+  --output /tmp/sora-dynamic-shape-diagnosis-20261103.json
+```
+
+The generated-image diagnostic on the dynamic evaluation folder
+will establish the actual triangle hit rate (which cannot be
+inferred from aggregate prompt accuracy). If the model reconstructs
+triangles from forward-noised targets at low/medium noise but not
+from pure Gaussian noise, the reverse trajectory / high-noise
+conditional generative dynamics remain suspects. If it cannot
+reconstruct triangles even given valid x_t, representation /
+conditioning/geometry training is the primary target. Either way
+a larger training run is not yet justified.
