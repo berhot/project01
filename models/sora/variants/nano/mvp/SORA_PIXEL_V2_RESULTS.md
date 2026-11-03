@@ -368,3 +368,53 @@ If they pass, attempt a 50-step integration smoke, followed by
 a bounded 300-step trial only if the user approves further compute.
 A triangle generated at the correct color in both languages,
 across multiple seeds, remains the acceptance gate.
+
+## Paired square/triangle experiment: 50-step integration success (2026-11-03)
+
+User's Mac: **62/62 tests passed** on the first paired-loss implementation.
+The existing 800-step spatial checkpoint was probed (read-only)
+on eight held-out square/triangle pairs:
+
+- Source checkpoint:
+  `pixel-20261103T065647Z-ee054d71/checkpoint.pt`
+- Initial probe: expected epsilon-difference RMS **0.369722**;
+  predicted difference RMS **0.034817**; ratio **0.094170**;
+  mean cosine alignment **−0.058700**.
+- Those initial eight pairs covered every color, but each color
+  appeared in only one language. Therefore the original numbers
+  support weak shape-conditioning response but are not a fully
+  bilingual balanced evaluation. The probe has now been corrected
+  to use matched validation batches at steps 1 and 3 for eight pairs,
+  giving **each of four colors once in English and once in Arabic**.
+  Re-run both checkpoints using the revised probe; **do not directly
+  compare revised ratios with the older 0.094170**.
+- First opt-in training test: 50 steps from the source checkpoint,
+  new separate checkpoint:
+  `pixel-20261103T124924Z-b7835e13/checkpoint.pt`
+- Paired shape-difference loss logged at step 1: **0.369545**;
+  step 50: **0.148050**; these are from different training batches.
+- Final logged regular noise MSE: **0.015162**, paired noise MSE:
+  **0.041782**; logged total loss at step 50: **0.082147**.
+- **No post-training validation probe or actual generated 24-image
+  gallery has been supplied.** Nothing yet proves triangle
+  generation or improvement.
+
+### Next verification without retraining
+
+After pulling latest changes, rerun all tests, then use the same
+balanced probe protocol for **both** source and fine-tuned checkpoints:
+
+```bash
+BASE="storage/artifacts/sora/nano/mvp/pixel-20261103T065647Z-ee054d71/checkpoint.pt"
+NEW="storage/artifacts/sora/nano/mvp/pixel-20261103T124924Z-b7835e13/checkpoint.pt"
+
+python3 -m scripts.pixel_shape_probe --checkpoint "$BASE" \
+  --pairs 8 --seed 42 --output "/tmp/sora-shape-base-balanced-42.json"
+python3 -m scripts.pixel_shape_probe --checkpoint "$NEW" \
+  --pairs 8 --seed 42 --output "/tmp/sora-shape-finetuned-balanced-42.json"
+```
+
+Then generate one 24-image CFG-5 posterior-mean preview from NEW,
+with independent normal per-class seeds to stay comparable with prior
+model evaluation; visually inspect triangle silhouettes. This is
+still 32×32 synthetic single-object research, not general image AI.
