@@ -29,13 +29,23 @@ WORDS = (
 VOCAB = {word:i for i,word in enumerate(WORDS)}
 
 
-def tokenize(text, max_tokens=12):
+def vocabulary_for(dataset_version="v1"):
+    if dataset_version == "v1":
+        return WORDS
+    if dataset_version == "v2":
+        from src.pixel_dataset_v2 import WORDS_V2
+        return WORDS_V2
+    raise ValueError("Unsupported dataset vocabulary version")
+
+
+def tokenize(text, max_tokens=12, dataset_version="v1"):
     if not isinstance(text,str) or not text.strip():
         raise ValueError("Prompt must be nonempty text")
     words = re.findall(r"[\w\u0621-\u064a]+",text.lower(),flags=re.UNICODE)
-    if not words or len(words)>max_tokens or any(word not in VOCAB for word in words):
-        raise ValueError("Unsupported vocabulary; this MVP only supports simple bilingual shape prompts")
-    return torch.tensor([VOCAB[word] for word in words]+[0]*(max_tokens-len(words)), dtype=torch.long)
+    vocabulary = {word: i for i, word in enumerate(vocabulary_for(dataset_version))}
+    if not words or len(words)>max_tokens or any(word not in vocabulary for word in words):
+        raise ValueError("Unsupported vocabulary; this MVP only supports bilingual shape prompts")
+    return torch.tensor([vocabulary[word] for word in words]+[0]*(max_tokens-len(words)), dtype=torch.long)
 
 
 def caption(color,shape,language="en",variant=0):
@@ -77,17 +87,19 @@ class PixelConfig:
     diffusion_steps:int=100
     max_tokens:int=12
     architecture:str="rgb-unet-text-v1"
+    dataset_version:str="v1"
     def __post_init__(self):
         if (self.image_size!=32 or self.max_tokens!=12 or self.channels<16
                 or self.channels%8 or self.text_dim<16 or self.diffusion_steps<8
-                or self.architecture!="rgb-unet-text-v1"):
+                or self.architecture!="rgb-unet-text-v1"
+                or self.dataset_version not in ("v1", "v2")):
             raise ValueError("Unsupported Sora pixel diffusion configuration")
 
 
 class TextEncoder(nn.Module):
     def __init__(self,cfg):
         super().__init__()
-        self.token=nn.Embedding(len(WORDS),cfg.text_dim,padding_idx=0)
+        self.token=nn.Embedding(len(vocabulary_for(cfg.dataset_version)),cfg.text_dim,padding_idx=0)
         self.position=nn.Embedding(cfg.max_tokens,cfg.text_dim)
         self.project=nn.Sequential(nn.LayerNorm(cfg.text_dim),nn.Linear(cfg.text_dim,cfg.text_dim),nn.SiLU())
     def forward(self,tokens):
@@ -212,7 +224,7 @@ def generate(model,prompt,seed=42,device="cpu",steps=None,sampler="posterior_mea
     else:
         steps=total if steps is None else steps
         if steps<2 or steps>total: raise ValueError("Invalid inference steps")
-    tokens=tokenize(prompt).unsqueeze(0).to(device)
+    tokens=tokenize(prompt, dataset_version=model.config.dataset_version).unsqueeze(0).to(device)
     generator=torch.Generator(device=device).manual_seed(int(seed))
     x=torch.randn((1,3,32,32),device=device,generator=generator)
     beta,alpha,cum=noise_schedule(model.config,device)
