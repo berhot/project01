@@ -18,7 +18,10 @@ import torch
 from src.pixel_metrics import analyze_image, summarize
 from src.pixel_diffusion import (
     COLORS, SHAPES, WORDS, PixelConfig, PixelDenoiser, caption,
-    generate, save_image, synthetic_example, training_loss,
+    generate, save_image, synthetic_example, training_loss, vocabulary_for,
+)
+from src.pixel_dataset_v2 import (
+    CONCEPTS as CONCEPTS_V2, caption_v2, balanced_training_batch,
 )
 
 PROMPTS = [
@@ -31,10 +34,11 @@ PROMPTS = [
 def load_model(path,device="cpu"):
     record=torch.load(path,map_location="cpu",weights_only=True)
     if (record.get("schema_version")!=1
-            or record.get("architecture")!="rgb-unet-text-v1"
-            or record.get("vocabulary")!=list(WORDS)):
+            or record.get("architecture")!="rgb-unet-text-v1"):
         raise ValueError("Incompatible Sora pixel diffusion checkpoint")
     cfg=PixelConfig(**record["config"])
+    if record.get("vocabulary") != list(vocabulary_for(cfg.dataset_version)):
+        raise ValueError("Checkpoint vocabulary does not match its dataset version")
     model=PixelDenoiser(cfg)
     model.load_state_dict(record["model"],strict=True)
     model.cfg_drop_prob = float(record.get("cfg_drop_prob", 0.0))
@@ -58,23 +62,28 @@ def train(args):
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
-    cfg=PixelConfig(channels=args.channels,diffusion_steps=args.diffusion_steps)
+    cfg=PixelConfig(channels=args.channels,diffusion_steps=args.diffusion_steps,
+                    dataset_version=args.dataset_version)
     model=PixelDenoiser(cfg).to(args.device)
     optimizer=torch.optim.AdamW(model.parameters(),lr=args.learning_rate)
     run=Path(args.output_root)/(
         "pixel-"+time.strftime("%Y%m%dT%H%M%SZ",time.gmtime())+"-"+uuid.uuid4().hex[:8])
     run.mkdir(parents=True,exist_ok=False)
     for step in range(1,args.steps+1):
-        batch=[]
-        for j in range(args.batch_size):
-            class_id=(step*args.batch_size+j)%6
-            color=list(COLORS)[class_id%3]
-            shape=SHAPES[class_id//3]
-            language="ar" if (j+step)%2 else "en"
-            batch.append(synthetic_example(
-                args.seed+step*4099+j*13,color,shape,language))
-        images=torch.stack([item[0] for item in batch]).to(args.device)
-        tokens=torch.stack([item[1] for item in batch]).to(args.device)
+        if cfg.dataset_version == "v2":
+            images, tokens = balanced_training_batch(step,args.batch_size,args.seed)
+            images, tokens = images.to(args.device), tokens.to(args.device)
+        else:
+            batch=[]
+            for j in range(args.batch_size):
+                class_id=(step*args.batch_size+j)%6
+                color=list(COLORS)[class_id%3]
+                shape=SHAPES[class_id//3]
+                language="ar" if (j+step)%2 else "en"
+                batch.append(synthetic_example(
+                    args.seed+step*4099+j*13,color,shape,language))
+            images=torch.stack([item[0] for item in batch]).to(args.device)
+            tokens=torch.stack([item[1] for item in batch]).to(args.device)
         model.train()
         optimizer.zero_grad(set_to_none=True)
         loss=training_loss(model,images,tokens,cfg_drop_prob=args.cfg_drop_prob)
@@ -87,11 +96,16 @@ def train(args):
     path=run/"checkpoint.pt"
     torch.save({
         "schema_version":1,"architecture":cfg.architecture,"family":"sora",
-        "config":asdict(cfg),"vocabulary":list(WORDS),
+        "config":asdict(cfg),"vocabulary":list(vocabulary_for(cfg.dataset_version)),
+        "dataset_version":cfg.dataset_version,
         "cfg_drop_prob":args.cfg_drop_prob,
         "model":{k:v.detach().cpu() for k,v in model.state_dict().items()},
         "seed":args.seed,"training_steps":args.steps,
-        "training_distribution":"synthetic one-shape RGB images with English and Arabic prompts",
+        "training_distribution":(
+            "synthetic v2 4-color/3-shape bilingual RGB images, variable position/size/light background"
+            if cfg.dataset_version=="v2" else
+            "synthetic v1 six-class bilingual one-shape RGB images"
+        ),
         "quality_status":"experimental; visual quality must be verified",
     },path)
     print(json.dumps({"checkpoint":str(path)}))
@@ -100,26 +114,33 @@ def train(args):
 
 def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mean",guidance_scale=1.0):
     require_guidance_training(model, guidance_scale)
+    version = model.config.dataset_version
+    prompts = PROMPTS if version=="v1" else [
+        (f"{color} {shape}",caption_v2(color,shape,"ar"))
+        for color,shape in CONCEPTS_V2
+    ]
+    columns = 3 if version=="v1" else 4
+    row_count = 2 * (len(prompts)//columns)
     path=Path(path)
     path.mkdir(parents=True,exist_ok=False)
-    grid=Image.new("RGB",(3*32*scale,4*(32*scale+25)),"white")
+    grid=Image.new("RGB",(columns*32*scale,row_count*(32*scale+25)),"white")
     draw=ImageDraw.Draw(grid)
     entries=[]
     predictions=[]
     device=next(model.parameters()).device
-    for j,(english,arabic) in enumerate(PROMPTS):
+    for j,(english,arabic) in enumerate(prompts):
         for lang_index,prompt in enumerate((english,arabic)):
             image=generate(model,prompt,seed=seed+j,device=device,steps=sample_steps,sampler=sampler,guidance_scale=guidance_scale)
             name=english.replace(" ","_")+("_en.png" if lang_index==0 else "_ar.png")
             save_image(image,path/name)
             thumbnail=Image.open(path/name).resize((32*scale,32*scale),Image.Resampling.NEAREST)
-            row=2*(j//3)+lang_index
-            col=j%3
+            row=2*(j//columns)+lang_index
+            col=j%columns
             x,y=col*32*scale,row*(32*scale+25)
             grid.paste(thumbnail,(x,y))
             draw.text((x+6,y+32*scale+4),english+(" EN" if lang_index==0 else " AR"),fill="black")
             expected_color, expected_shape = english.split()
-            finding = analyze_image(image)
+            finding = analyze_image(image,dataset_version=version)
             language = "en" if lang_index == 0 else "ar"
             predictions.append({
                 "expected_color":expected_color,"expected_shape":expected_shape,
@@ -131,9 +152,10 @@ def evaluate(model,path,seed=42,sample_steps=None,scale=8,sampler="posterior_mea
             entries.append({"prompt":prompt,"image":name,"seed":seed+j,
                             "language":language,"heuristic":finding})
     grid.save(path/"preview_grid.png")
-    metrics = summarize(predictions)
+    metrics = summarize(predictions,dataset_version=version)
     (path/"report.json").write_text(json.dumps({
         "schema_version":1,"architecture":"rgb-unet-text-v1",
+        "dataset_version":version,
         "training_data":"synthetic; no photorealistic or open-domain data",
         "image_pixels_generated_by_diffusion":True,
         "sampler":sampler,"sample_steps":sample_steps,
@@ -157,6 +179,7 @@ def main():
     t.add_argument("--seed",type=int,default=42)
     t.add_argument("--base-channels","--channels",dest="channels",type=int,default=32)
     t.add_argument("--cfg-drop-prob",type=float,default=0.15)
+    t.add_argument("--dataset-version",choices=("v1","v2"),default="v1")
     t.add_argument("--diffusion-steps",type=int,default=100)
     t.add_argument("--device",choices=("cpu","cuda","mps"),default="cpu")
     t.add_argument("--cpu-threads",type=int,default=2)
