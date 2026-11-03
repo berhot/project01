@@ -21,10 +21,18 @@ def compare_reports(baseline_report,candidate_report,
     for label,doc in (("baseline",before),("candidate",after)):
         if doc.get("dataset_version")!="v2":
             raise ValueError(f"{label} is not a v2 report")
-    for key in ("dataset_version","sampler","guidance_scale",
-                "shared_noise_across_concepts"):
+    for key in ("dataset_version","sampler","guidance_scale"):
         if before.get(key)!=after.get(key):
             raise ValueError(f"Cannot compare different {key}")
+    # Early saved reports predate the shared-noise option. Those reports
+    # used per-prompt seeds, so an omitted field means False, not unknown.
+    # Explicit True remains a distinct evaluation protocol and is rejected
+    # when compared against a legacy/per-prompt-seed report.
+    before_shared=before.get("shared_noise_across_concepts",False)
+    after_shared=after.get("shared_noise_across_concepts",False)
+    if (not isinstance(before_shared,bool) or not isinstance(after_shared,bool)
+            or before_shared!=after_shared):
+        raise ValueError("Cannot compare different shared_noise_across_concepts")
     def signatures(doc):
         return sorted((item["image"],item["language"],item["seed"])
                       for item in doc["items"])
