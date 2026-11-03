@@ -264,12 +264,16 @@ def evaluate(run_dir,output_dir=None,seed=42,device="cpu",latent_scale=1.0):
     mask_model,rgb_model,manifest=load_pipeline(run_dir,device=device)
     root=Path(output_dir) if output_dir is not None else sora_run("shape-first-eval")
     root.mkdir(parents=True,exist_ok=False)
+    masks_dir=root/"learned_masks"
+    masks_dir.mkdir(exist_ok=False)
     images=[]
     items=[]
     rows=[]
     old_predictions=[]
     sheet=Image.new("RGB",(4*32*7,6*(32*7+26)),"white")
+    mask_sheet=Image.new("RGB",(4*32*7,6*(32*7+26)),"white")
     pen=ImageDraw.Draw(sheet)
+    mask_pen=ImageDraw.Draw(mask_sheet)
     for index,shape in enumerate(SHAPES):
         for color_index,color in enumerate(COLORS):
             col=color_index
@@ -283,6 +287,12 @@ def evaluate(run_dir,output_dir=None,seed=42,device="cpu",latent_scale=1.0):
                     latent_scale=latent_scale,device=device)
                 filename=f"{color}_{shape}_{language}.png"
                 save_image(rgb,root/filename)
+                # Debug outputs come from the trained mask decoder, never PIL
+                # shape templates. These are saved separately from RGB gallery.
+                learned_mask=Image.fromarray(
+                    (hard[0].numpy()*255).astype("uint8"),mode="L"
+                )
+                learned_mask.save(masks_dir/filename)
                 quality=score_model_sample(rgb,color,shape)
                 predictions=analyze_image(rgb,dataset_version="v2")
                 old_predictions.append({
@@ -296,15 +306,21 @@ def evaluate(run_dir,output_dir=None,seed=42,device="cpu",latent_scale=1.0):
                 with Image.open(root/filename) as img:
                     sheet.paste(img.resize((32*7,32*7),Image.Resampling.NEAREST),(x,y))
                 pen.text((x+5,y+32*7+5),f"{color} {shape} {language}",fill="black")
+                mask_sheet.paste(learned_mask.convert("RGB").resize(
+                    (32*7,32*7),Image.Resampling.NEAREST),(x,y))
+                mask_pen.text((x+5,y+32*7+5),
+                              f"{color} {shape} {language}",fill="black")
                 images.append(rgb)
                 items.append({
                     "prompt":prompt,"image":filename,"language":language,
                     "seed":shared_seed,"expected_shape":shape,
                     "expected_color":color,
+                    "learned_mask":f"learned_masks/{filename}",
                     "strict_geometry":quality,
                 })
                 rows.append(quality)
     sheet.save(root/"preview_grid.png")
+    mask_sheet.save(root/"learned_masks_preview_grid.png")
     strict={
         shape:{
             "images":sum(item["expected_shape"]==shape for item in items),
@@ -338,6 +354,7 @@ def evaluate(run_dir,output_dir=None,seed=42,device="cpu",latent_scale=1.0):
         fd.write("\n")
     print(json.dumps({
         "preview_grid":str(root/"preview_grid.png"),
+        "learned_masks_preview_grid":str(root/"learned_masks_preview_grid.png"),
         "report":str(root/"report.json"),
         "images":24,
         "strict_by_shape":strict,
