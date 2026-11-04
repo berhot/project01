@@ -1,0 +1,171 @@
+name: Sora Nano visual baseline
+
+# Manual-only during active development to avoid repeated failing-run emails.
+on:
+  workflow_dispatch:
+
+jobs:
+  test-and-train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: models/sora/variants/nano/mvp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Train independent spatial-field baseline
+        run: |
+          python -m scripts.spatial_field train \
+            --steps 1100 --batch-size 24 --device cpu --cpu-threads 2 \
+            --output-root /tmp/sora-nano-artifacts
+      - name: Held-out six-prompt evaluation
+        run: |
+          CKPT=$(find /tmp/sora-nano-artifacts -type f -name checkpoint.pt | head -n 1)
+          test -n "$CKPT"
+          python -m scripts.spatial_field evaluate \
+            --checkpoint "$CKPT" --seed 42 --output-dir /tmp/sora-preview-seed42
+          python -m scripts.spatial_field evaluate \
+            --checkpoint "$CKPT" --seed 123 --output-dir /tmp/sora-preview-seed123
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          scores = []
+          for seed in (42,123):
+              report = json.loads(Path(f"/tmp/sora-preview-seed{seed}/report.json").read_text())
+              scores.append(report["mean_mask_iou"])
+          print("Mean IoUs:", scores)
+          if min(scores) < 0.90:
+              raise SystemExit("Spatial baseline failed held-out IoU threshold")
+          PY
+      - name: Train learned layout DDPM (no external geometry at inference)
+        run: |
+          python -m scripts.layout_diffusion train \
+            --steps 2000 --batch-size 256 --device cpu --cpu-threads 2 \
+            --output-root /tmp/sora-layout-artifacts
+      - name: Evaluate learned layouts with trained spatial renderer
+        run: |
+          LAYOUT=$(find /tmp/sora-layout-artifacts -type f -name checkpoint.pt | head -n 1)
+          SPATIAL=$(find /tmp/sora-nano-artifacts -type f -name checkpoint.pt | head -n 1)
+          test -n "$LAYOUT" && test -n "$SPATIAL"
+          python -m scripts.layout_diffusion evaluate \
+            --layout-checkpoint "$LAYOUT" --spatial-checkpoint "$SPATIAL" \
+            --seed 42 --output-dir /tmp/sora-learned-layout-seed42
+          python -m scripts.layout_diffusion evaluate \
+            --layout-checkpoint "$LAYOUT" --spatial-checkpoint "$SPATIAL" \
+            --seed 123 --output-dir /tmp/sora-learned-layout-seed123
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          reports = [
+            json.loads(Path(f"/tmp/sora-learned-layout-seed{s}/report.json").read_text())
+            for s in (42, 123)
+          ]
+          assert all(len(r["items"]) == 6 for r in reports)
+          first = [i["generated_center_and_halfwidth"] for i in reports[0]["items"]]
+          second = [i["generated_center_and_halfwidth"] for i in reports[1]["items"]]
+          assert first != second, "Generated layouts must vary by seed"
+          for item in reports[0]["items"] + reports[1]["items"]:
+              x, y, half = item["generated_center_and_halfwidth"]
+              assert 6 <= half <= 10.5
+              assert 3 + half - 1e-3 <= x <= 29 - half + 1e-3
+              assert 3 + half - 1e-3 <= y <= 29 - half + 1e-3
+          print("Learned layout sampling, bounds, and six-prompt PNG export passed")
+          PY
+      - name: RGB pixel diffusion smoke training (not image quality validation)
+        run: |
+          python -m scripts.pixel_diffusion train \
+            --steps 40 --batch-size 6 --device cpu --cpu-threads 2 \
+            --base-channels 16 --cfg-drop-prob 0.15 \
+            --output-root /tmp/sora-pixel-artifacts
+      - name: Bilingual RGB pixel diffusion PNG inference
+        run: |
+          PIXEL=$(find /tmp/sora-pixel-artifacts -name checkpoint.pt -type f | head -n 1)
+          test -n "$PIXEL"
+          python -m scripts.pixel_diffusion evaluate \
+            --checkpoint "$PIXEL" --seed 42 --sampler ddim --sample-steps 8 \
+            --guidance-scale 3.0 \
+            --output-dir /tmp/sora-pixel-preview
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path("/tmp/sora-pixel-preview/report.json").read_text())
+          assert report["image_pixels_generated_by_diffusion"] is True
+          assert len(report["items"])==12
+          assert sum(1 for p in Path("/tmp/sora-pixel-preview").glob("*.png"))==13
+          print("Pixel-level RGB diffusion smoke passed; visual quality NOT certified")
+          PY
+      - name: Compare CFG guidance with genuine pixels and toy metrics
+        run: |
+          PIXEL=$(find /tmp/sora-pixel-artifacts -name checkpoint.pt -type f | head -n 1)
+          test -n "$PIXEL"
+          python -m scripts.pixel_metrics \
+            --checkpoint "$PIXEL" --sampler ddim --sample-steps 4 \
+            --guidance-scales 1 3 --seeds 42 \
+            --output-dir /tmp/sora-guidance-check
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result=json.loads(Path("/tmp/sora-guidance-check/summary.json").read_text())
+          assert len(result["results"])==2
+          for sample in result["results"]:
+              metrics=sample["metrics"]
+              assert metrics["total_images"]==12
+              assert "prompt_accuracy" in metrics
+              assert "bilingual_both_correct" in metrics
+          print("CFG comparison and toy metrics schema passed; NO quality claim")
+          PY
+      - name: Inspect v2 procedural dataset (not model output)
+        run: |
+          python -m scripts.dataset_v2 preview \
+            --split validation --seed 42 \
+            --output-dir /tmp/sora-dataset-v2-preview
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path("/tmp/sora-dataset-v2-preview/manifest.json").read_text())
+          assert manifest["samples"]==24
+          assert manifest["classes"]==12
+          assert "NOT diffusion-generated" in manifest["source"]
+          PY
+      - name: v2 RGB diffusion checkpoint and bilingual smoke inference
+        run: |
+          python -m scripts.pixel_diffusion train \
+            --dataset-version v2 --steps 12 --batch-size 12 \
+            --base-channels 16 --cfg-drop-prob 0.15 \
+            --device cpu --cpu-threads 2 --output-root /tmp/sora-pixel-v2-smoke
+          PIXEL_V2=$(find /tmp/sora-pixel-v2-smoke -name checkpoint.pt -type f | head -n 1)
+          test -n "$PIXEL_V2"
+          python -m scripts.pixel_diffusion evaluate \
+            --checkpoint "$PIXEL_V2" --sampler ddim --sample-steps 4 \
+            --guidance-scale 3 --output-dir /tmp/sora-pixel-v2-preview
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path("/tmp/sora-pixel-v2-preview/report.json").read_text())
+          assert report["dataset_version"] == "v2"
+          assert len(report["items"]) == 24
+          assert report["metrics"]["bilingual_pairs"] == 12
+          print("v2 infrastructure smoke passed; NO visual-quality claim")
+          PY
+      - name: Upload genuine learned samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sora-spatial-visual-baseline
+          path: |
+            /tmp/sora-preview-seed42/
+            /tmp/sora-preview-seed123/
+            /tmp/sora-learned-layout-seed42/
+            /tmp/sora-learned-layout-seed123/
+            /tmp/sora-pixel-preview/
+            /tmp/sora-guidance-check/
+            /tmp/sora-dataset-v2-preview/
+            /tmp/sora-pixel-v2-preview/
+          if-no-files-found: ignore
